@@ -223,7 +223,17 @@ class SpicyResults:
         return ax
 
     def __repr__(self):
-        n = len(self.cell_results)
-        what = "survival" if self.survival else f"conditions {self.levels}"
-        sig = int((self.cell_results["p_adj"] < 0.05).sum())
-        return f"SpicyResults (spicyR Cell): {n} tests, {what}; {sig} with BH-adjusted p < 0.05"
+        t = self.cell_results
+        n = len(t[["from", "to"]].drop_duplicates())
+        what = "association with survival" if self.survival else "; ".join(f"{l} vs {self.levels[0]}" for l in self.levels[1:])
+        scale = f"k = {self.k} nearest neighbours" if self.k is not None else "r = " + ", ".join(f"{v:g}" for v in self.r)
+        lines = [f"spicyr (cell-level test): {n} pairs, {what}, {scale}"]
+        if self.subject is None:
+            lines.append(f"Units: {len(self.image_ids)} images (no subject given: each image is a patient)")
+        else:
+            lines.append(f"Units: {len(set(self.subject))} patients with {len(self.image_ids)} images")
+        sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
+        if "adjusted_p_adj" in t.columns:
+            sig += f" ({int((t['adjusted_p_adj'] < 0.05).sum())} after adjusting for abundance)"
+        lines += [sig, "See top_pairs() and .cell_results."]
+        return "\n".join(lines)
