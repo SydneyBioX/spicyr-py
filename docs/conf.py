@@ -1,0 +1,10 @@
+project = "spicyr"
+author = "Ellis Patrick, Sadiq Dohadwalla, Elijah Willie"
+copyright = "2026, the spicyR authors"
+extensions = ["myst_nb", "sphinx.ext.autodoc", "sphinx.ext.napoleon", "sphinx_autodoc_typehints"]
+html_theme = "sphinx_book_theme"
+html_title = "spicyr"
+html_theme_options = {"repository_url": "https://github.com/SydneyBioX/spicyr-py", "use_repository_button": True}
+nb_execution_mode = "off"
+myst_enable_extensions = ["dollarmath", "colon_fence"]
+napoleon_numpy_docstring = True

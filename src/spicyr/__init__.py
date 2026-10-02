@@ -7,6 +7,7 @@ results. ``spicy()`` works with pandas DataFrames, AnnData and SpatialData objec
 from ._api import spicy
 from ._input import format_data
 from ._results import SpicyResults
+from . import datasets
 
 __version__ = "1.99.0"
-__all__ = ["spicy", "format_data", "SpicyResults", "__version__"]
+__all__ = ["spicy", "format_data", "SpicyResults", "datasets", "__version__"]

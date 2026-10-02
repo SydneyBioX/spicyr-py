@@ -1,0 +1,3 @@
+# the shared C++ core is checksummed: never convert its line endings
+src/core/** -text
+*.csv -text
