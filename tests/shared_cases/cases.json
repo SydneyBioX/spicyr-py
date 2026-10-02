@@ -1,0 +1,64 @@
+{
+  "two_groups": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30
+  },
+  "hk_no_clustering": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "variance": "hartung_knapp",
+    "labelClustering": false
+  },
+  "images_as_units": {
+    "condition": "condition",
+    "r": 30,
+    "from": "tumour",
+    "to": ["T", "B"]
+  },
+  "three_levels": {
+    "condition": "stage",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T"],
+    "to": ["T", "B"]
+  },
+  "covariates": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "covariates": ["age", "batch"],
+    "from": "tumour"
+  },
+  "knn": {
+    "condition": "condition",
+    "subject": "patient",
+    "k": 10,
+    "from": ["tumour", "macro"],
+    "to": ["T", "B"]
+  },
+  "radii_maxT": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": [10, 20, 40],
+    "from": "tumour",
+    "to": ["T", "B", "macro"]
+  },
+  "radii_cauchy": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": [10, 20, 40],
+    "from": "tumour",
+    "to": ["T", "B"],
+    "combine": "cauchy"
+  },
+  "survival": {
+    "condition": "os",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T"],
+    "to": ["T", "B", "macro"],
+    "covariates": "age"
+  }
+}

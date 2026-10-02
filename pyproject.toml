@@ -1,0 +1,46 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "pybind11>=2.12"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "spicyr"
+version = "1.99.0"
+description = "Calibrated tests for changes in cell-type co-localisation between groups of patients (the Python twin of the Bioconductor package spicyR)"
+readme = "README.md"
+license = "GPL-2.0-or-later"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+authors = [
+  { name = "Ellis Patrick", email = "ellis.patrick@sydney.edu.au" },
+  { name = "Sadiq Dohadwalla" },
+  { name = "Elijah Willie" },
+  { name = "Nicolas Canete" },
+]
+maintainers = [{ name = "Ellis Patrick", email = "ellis.patrick@sydney.edu.au" }]
+keywords = ["spatial omics", "co-localisation", "cell types", "scverse", "spatialdata", "anndata"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: C++",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+  "Intended Audience :: Science/Research",
+]
+dependencies = ["numpy>=1.24", "pandas>=2.0"]
+
+[project.optional-dependencies]
+anndata = ["anndata>=0.10"]
+spatialdata = ["spatialdata>=0.2", "anndata>=0.10"]
+plot = ["matplotlib>=3.7"]
+test = ["pytest>=7", "anndata>=0.10", "matplotlib>=3.7"]
+doc = ["sphinx>=7", "myst-nb", "sphinx-book-theme", "sphinx-autodoc-typehints"]
+
+[project.urls]
+Homepage = "https://github.com/SydneyBioX/spicyr-py"
+Documentation = "https://spicyr-py.readthedocs.io"
+"R package (spicyR)" = "https://bioconductor.org/packages/spicyR"
+
+[tool.scikit-build]
+wheel.packages = ["src/spicyr"]
+cmake.build-type = "Release"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
