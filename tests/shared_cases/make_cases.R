@@ -19,6 +19,7 @@ cells$batch <- c("b1", "b2")[1 + (match(cells$imageID, unique(cells$imageID)) %%
 cells$stage <- c("I", "II", "III")[1 + (match(cells$patient, pat) %% 3)]                         # three levels
 cells$time <- round(stats::rexp(length(pat), 0.1), 2)[match(cells$patient, pat)]
 cells$event <- stats::rbinom(length(pat), 1, 0.7)[match(cells$patient, pat)]
+cells$age_na <- ifelse(cells$patient %in% c("A02", "B05"), NA, cells$age)                 # missing for two patients
 utils::write.csv(cells, file.path(out_dir, "cells.csv"), row.names = FALSE)
 
 cases <- list(
@@ -30,7 +31,9 @@ cases <- list(
   knn = list(condition = "condition", subject = "patient", k = 10, from = c("tumour", "macro"), to = c("T", "B")),
   radii_maxT = list(condition = "condition", subject = "patient", r = c(10, 20, 40), from = "tumour", to = c("T", "B", "macro")),
   radii_cauchy = list(condition = "condition", subject = "patient", r = c(10, 20, 40), from = "tumour", to = c("T", "B"), combine = "cauchy"),
-  survival = list(condition = "os", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B", "macro"), covariates = "age")
+  survival = list(condition = "os", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B", "macro"), covariates = "age"),
+  covariates_missing = list(condition = "condition", subject = "patient", r = 30, covariates = c("age_na", "batch"), from = c("tumour", "T")),
+  survival_missing = list(condition = "os", subject = "patient", r = 30, from = "T", to = c("tumour", "B"), covariates = "age_na")
 )
 manifest <- list()
 for (nm in names(cases)) {

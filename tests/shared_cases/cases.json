@@ -60,5 +60,20 @@
     "from": ["tumour", "T"],
     "to": ["T", "B", "macro"],
     "covariates": "age"
+  },
+  "covariates_missing": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "covariates": ["age_na", "batch"],
+    "from": ["tumour", "T"]
+  },
+  "survival_missing": {
+    "condition": "os",
+    "subject": "patient",
+    "r": 30,
+    "from": "T",
+    "to": ["tumour", "B"],
+    "covariates": "age_na"
   }
 }

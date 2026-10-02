@@ -156,6 +156,10 @@ def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     return rows
 
 
+def _subset_rows(rows, keep) -> dict:
+    return {k: v[keep] for k, v in rows.items()}
+
+
 def _share(ctx, rows, f):
     i = rows["img"]
     return np.log(np.maximum(ctx.counts[i, ctx.type_labels.index(f)], 0.5) / ctx.counts.sum(axis=1)[i])
@@ -171,11 +175,15 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, availability, Z_extra=None) 
     if not r["ok"]:
         return out
     if Z_extra is not None:
+        # images with a missing covariate are left out of the covariate model
         ze = Z_extra[rows["img"], :]
-        Z = np.column_stack([rows["group"] == 0, rows["group"] == 1, ze]).astype(float)
-        patient_level = all(pd.Series(ze[:, j]).groupby(rows["unit"]).nunique().eq(1).all() for j in range(ze.shape[1]))
+        cc = np.all(np.isfinite(ze), axis=1)
+        rc = _subset_rows(rows, cc)
+        ze = ze[cc]
+        Z = np.column_stack([rc["group"] == 0, rc["group"] == 1, ze]).astype(float)
+        patient_level = all(pd.Series(ze[:, j]).groupby(rc["unit"]).nunique().eq(1).all() for j in range(ze.shape[1]))
         cvec = np.concatenate([[-1.0, 1.0], np.zeros(ze.shape[1])])
-        out["covariate"] = _core.design_test(rows, rows["unit"], m, Z, cvec, -1.0 if patient_level else r["tau2"])
+        out["covariate"] = _core.design_test(rc, rc["unit"], m, Z, cvec, -1.0 if patient_level else r["tau2"])
     if availability:
         share = _share(ctx, rows, f)
         out["availability"] = (_core.availability_test(rows, rows["unit"], rows["group"], m, share, r["tau2"])
@@ -193,14 +201,14 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, availability, Z_extra) -> di
         return out
     Zg = (rows["group"][:, None] == np.arange(G)[None, :]).astype(float)
 
-    def fit(Z, tau2):
+    def fit(Z, tau2, rw=rows):
         q = Z.shape[1]
         tau = tau2
         res = {}
         for l in range(1, G):
             cvec = np.zeros(q)
             cvec[0], cvec[l] = -1.0, 1.0
-            d = _core.design_test(rows, rows["unit"], m, Z, cvec, tau)
+            d = _core.design_test(rw, rw["unit"], m, Z, cvec, tau)
             if not d["ok"]:
                 return None
             tau = d["tau2"]
@@ -214,7 +222,9 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, availability, Z_extra) -> di
     first = next(iter(d.values()))
     out.update(ok=True, levels_test=d, test={"coef_ref": first["theta"][0], "tau2": first["tau2"]})
     if Z_extra is not None:
-        out["covariate_levels"] = fit(np.column_stack([Zg, Z_extra[rows["img"], :]]), first["tau2"])
+        cc = np.all(np.isfinite(Z_extra[rows["img"], :]), axis=1)
+        rc = _subset_rows(rows, cc)
+        out["covariate_levels"] = fit(np.column_stack([Zg[cc], Z_extra[rc["img"], :]]), first["tau2"], rc)
     if availability:
         share = _share(ctx, rows, f)
         if np.var(share, ddof=1) > 0:

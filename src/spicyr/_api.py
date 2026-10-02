@@ -92,8 +92,8 @@ def spicy(cells, condition, subject=None, covariates=None, image_id="imageID", c
         miss = [c for c in covariates if c not in pheno.columns]
         if miss:
             raise ValueError(f"covariates not found: {miss}")
-        Z_extra = _model_matrix(pheno, covariates)
-        Z_extra = Z_extra - Z_extra.mean(axis=0)
+        Z_extra = _model_matrix(pheno, covariates)          # NaN rows where a covariate is missing
+        Z_extra = Z_extra - np.nanmean(Z_extra, axis=0)
 
     radii = [np.nan] if k is not None else sorted(set(np.atleast_1d(r).astype(float)))
     if len(radii) > 1 and not is_surv and len(ctx.levels) > 2:
@@ -119,7 +119,9 @@ def _model_matrix(pheno, covariates) -> np.ndarray:
             cols.append(v.to_numpy(float)[:, None])
         else:
             lev = _cell.condition_levels(v)
-            cols.append(np.column_stack([(v.astype(str) == l).to_numpy(float) for l in lev[1:]]))
+            d = np.column_stack([(v.astype(str) == l).to_numpy(float) for l in lev[1:]])
+            d[v.isna().to_numpy()] = np.nan
+            cols.append(d)
     return np.column_stack(cols)
 
 
@@ -172,7 +174,7 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores):
     if (pd.Series(pheno[".time"].to_numpy()).groupby(ctx.image_unit).nunique() > 1).any():
         raise ValueError("the survival outcome must be constant within each subject.")
     W = np.zeros((len(time), 0)) if covariates is None else _model_matrix(pheno.iloc[unit_first].reset_index(drop=True), covariates)
-    ok_u = np.isfinite(time) & np.isfinite(event)
+    ok_u = np.isfinite(time) & np.isfinite(event) & np.all(np.isfinite(W), axis=1)
     null = _core.cox_fit(time[ok_u], event[ok_u].astype(np.int32), W[ok_u].ravel(), W.shape[1])
     if not null["ok"]:
         raise RuntimeError("the null Cox model did not converge.")
