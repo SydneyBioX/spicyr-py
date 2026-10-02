@@ -29,10 +29,10 @@ dependencies = ["numpy>=1.24", "pandas>=2.0"]
 [project.optional-dependencies]
 anndata = ["anndata>=0.10"]
 spatialdata = ["spatialdata>=0.2", "anndata>=0.10"]
-plot = ["matplotlib>=3.7"]
+plot = ["matplotlib>=3.7", "plotly>=5"]
 data = ["rds2py>=0.5"]
-test = ["pytest>=7", "anndata>=0.10", "matplotlib>=3.7"]
-doc = ["sphinx>=7", "myst-nb>=1", "sphinx-book-theme", "sphinx-autodoc-typehints", "ipykernel", "matplotlib>=3.7", "anndata>=0.10", "rds2py>=0.5"]
+test = ["pytest>=7", "anndata>=0.10", "matplotlib>=3.7", "plotly>=5"]
+doc = ["sphinx>=7", "myst-nb>=1", "sphinx-book-theme", "sphinx-autodoc-typehints", "ipykernel", "matplotlib>=3.7", "plotly>=5", "anndata>=0.10", "rds2py>=0.5"]
 
 [project.urls]
 Homepage = "https://github.com/SydneyBioX/spicyr-py"

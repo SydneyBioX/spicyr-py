@@ -9,6 +9,10 @@ import pandas as pd
 
 from ._cell import p_adjust_bh
 
+# matplotlib's tab10, translucent, for the plotly boxes (the same colours as the static plot)
+_TAB10_RGBA = ["rgba(31,119,180,0.3)", "rgba(255,127,14,0.3)", "rgba(44,160,44,0.3)", "rgba(214,39,40,0.3)",
+               "rgba(148,103,189,0.3)", "rgba(140,86,75,0.3)"]
+
 
 @dataclass
 class SpicyResults:
@@ -99,21 +103,79 @@ class SpicyResults:
             out[k] = self.pairwise_assoc[k]
         return out
 
-    def box_plot(self, from_: str, to: str, ax=None):
-        """Per-image excess of one pair by condition (spicyR's ``spicyBoxPlot()``)."""
+    def box_plot(self, from_: str, to: str, ax=None, interactive: bool = False):
+        """Per-image excess of one pair by condition, with a point per image behind each box (spicyR's
+        ``spicyBoxPlot()``).
+
+        Each point is sized by how much the image contributes to the test (its weight in the frailty model,
+        relative to the average image of its condition). With ``interactive=True`` the result is a plotly figure:
+        hover over a point to see its image, patient, excess and weight, which helps to find images worth
+        looking at with :func:`spicyr.plot_image`. Images in which the pair was not tested are not shown.
+        """
+        key = f"{from_}__{to}"
+        if key not in self.pairwise_assoc:
+            raise KeyError(f"pair {from_} -> {to} not found in the results.")
+        d = self.bind(key).rename(columns={key: "excess"})
+        if "subject" not in d.columns:
+            d["subject"] = d["imageID"]
+        d["weight"] = self.image_weights.get(key, np.full(len(d), np.nan))
+        d = d[np.isfinite(d["excess"].to_numpy(float))]
+        d["relative"] = d["weight"] / d.groupby("condition")["weight"].transform("mean")
+        groups = [g for g in (self.levels or []) if (d["condition"] == g).any()]
+        sized = bool(np.isfinite(d["relative"]).any())
+        ylabel, title = f"Extra {to} per {from_}<br>(beyond chance)", f"{to} around {from_}"
+        if interactive:
+            return self._box_plotly(d, groups, sized, ylabel, title)
         import matplotlib.pyplot as plt
 
-        d = self.bind(f"{from_}__{to}")
-        ax = ax or plt.figure(figsize=(4, 4)).gca()
-        groups = [g for g in (self.levels or [])]
-        data = [d.loc[d["condition"] == g, f"{from_}__{to}"].dropna().to_numpy() for g in groups]
-        ax.boxplot(data)
+        ax = ax or plt.figure(figsize=(4.5, 4.5)).gca()
+        rng = np.random.default_rng(1)
+        for i, g in enumerate(groups, start=1):
+            z = d[d["condition"] == g]
+            size = 25 * z["relative"].to_numpy(float) if sized else 12
+            ax.scatter(i + rng.uniform(-0.2, 0.2, len(z)), z["excess"], s=size, color="grey", alpha=0.45, lw=0,
+                       zorder=1)
+        bp = ax.boxplot([d.loc[d["condition"] == g, "excess"].to_numpy() for g in groups], widths=0.55,
+                        showfliers=False, patch_artist=True, zorder=2)
+        for patch, colour in zip(bp["boxes"], plt.cm.tab10.colors):
+            patch.set(facecolor=(*colour, 0.3), edgecolor="black")
+        for med in bp["medians"]:
+            med.set_color("black")
+        if sized:
+            for v in (0.5, 1.0, 1.5):
+                ax.scatter([], [], s=25 * v, color="grey", alpha=0.45, lw=0, label=f"{v:g}")
+            ax.legend(title="Relative\nweight", frameon=False, loc="upper left", bbox_to_anchor=(1, 1))
         ax.set_xticks(range(1, len(groups) + 1), groups)
-        ax.axhline(0, color="grey", lw=0.8, ls="--")
-        ax.set_xlabel("Condition")
-        ax.set_ylabel(f"Extra {to} per {from_}\n(beyond chance)")
-        ax.set_title(f"{to} around {from_}")
+        ax.axhline(0, color="grey", lw=0.8, ls="--", zorder=0)
+        ax.set_ylabel(ylabel.replace("<br>", "\n"))
+        ax.set_title(title)
+        ax.spines[["top", "right"]].set_visible(False)
         return ax
+
+    def _box_plotly(self, d, groups, sized, ylabel, title):
+        try:
+            import plotly.graph_objects as go
+        except ImportError as e:
+            raise ImportError("interactive=True needs plotly: pip install plotly") from e
+        fig = go.Figure()
+        rng = np.random.default_rng(1)
+        for i, g in enumerate(groups):
+            z = d[d["condition"] == g]
+            hover = ("image: " + z["imageID"].astype(str)
+                     + np.where(z["subject"] != z["imageID"], "<br>patient: " + z["subject"].astype(str), "")
+                     + "<br>excess: " + z["excess"].map(lambda v: f"{v:.3g}")
+                     + (("<br>relative weight: " + z["relative"].map(lambda v: f"{v:.2g}")) if sized else ""))
+            fig.add_trace(go.Scatter(x=i + rng.uniform(-0.2, 0.2, len(z)), y=z["excess"], mode="markers",
+                                     marker=dict(size=(4 + 6 * np.sqrt(z["relative"].to_numpy(float))) if sized else 6,
+                                                 color="grey", opacity=0.5, line=dict(width=0)),
+                                     text=hover, hoverinfo="text", name=g, showlegend=False))
+            fig.add_trace(go.Box(x=np.full(len(z), i), y=z["excess"], name=g, boxpoints=False, width=0.55,
+                                 fillcolor=_TAB10_RGBA[i % len(_TAB10_RGBA)],
+                                 line=dict(color="black", width=1), hoverinfo="skip", showlegend=False))
+        fig.add_hline(y=0, line_dash="dash", line_color="grey", line_width=1)
+        fig.update_layout(title=title, yaxis_title=ylabel, template="simple_white", width=520, height=480,
+                          xaxis=dict(tickmode="array", tickvals=list(range(len(groups))), ticktext=groups))
+        return fig
 
     def signif_plot(self, fdr: bool = False, breaks=None, comparison_group: str | None = None,
                     colours=("#4575B4", "white", "#D73027"), marks_to_plot=None, cutoff: float = 0.05, ax=None):

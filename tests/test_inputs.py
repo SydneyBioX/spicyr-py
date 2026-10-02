@@ -64,3 +64,10 @@ def test_accessors():
     pytest.importorskip("matplotlib")
     res.box_plot("tumour", "T")
     res.signif_plot()
+    spicyr.plot_image(CELLS, CELLS["imageID"].iloc[0], "tumour", "T", r=30)
+    w = res.image_weights["tumour__T"]
+    sums = pd.Series(w).groupby(np.array(res.condition)).sum()
+    np.testing.assert_allclose(sums.to_numpy(), 1.0, rtol=1e-10)
+    plotly = pytest.importorskip("plotly")
+    fig = res.box_plot("tumour", "T", interactive=True)
+    assert any(tr.type == "scatter" and "image:" in tr.text[0] for tr in fig.data)
