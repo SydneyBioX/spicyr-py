@@ -62,6 +62,14 @@ reference, `intercept`) to condition B.
 res.signif_plot();
 ```
 
+Each disc is a pair: its left half is coloured by the excess in condition A, its right half by the excess in
+condition B, the size grows with -log10 p and a black ring marks p < 0.05 (`fdr=True` uses the BH-adjusted p).
+This is the same plot as `signifPlot()` in spicyR.
+
+```{code-cell} ipython3
+res.signif_plot(fdr=True);
+```
+
 ## One pair
 
 ```{code-cell} ipython3

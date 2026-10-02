@@ -112,24 +112,113 @@ class SpicyResults:
         ax.set_title(f"{to} cells around {from_} cells")
         return ax
 
-    def signif_plot(self, cutoff: float = 0.05, ax=None):
-        """Bubble plot of every pair: colour = difference in excess, size = -log10 p, ring = BH < cutoff
-        (spicyR's ``signifPlot()``)."""
+    def signif_plot(self, fdr: bool = False, breaks=None, comparison_group: str | None = None,
+                    colours=("#4575B4", "white", "#D73027"), marks_to_plot=None, cutoff: float = 0.05, ax=None):
+        """Bubble plot of every pair, as spicyR's ``signifPlot()``.
+
+        Each pair is a disc at (to, from). Its left half is coloured by the excess in the reference condition and
+        its right half by the excess in the comparison condition; the radius grows with -log10 p, and a black
+        ring marks p (or, with ``fdr=True``, the BH-adjusted p) below ``cutoff``. ``breaks`` is
+        ``(low, high, step)`` for the colour scale. For survival results each disc is one colour: the log hazard
+        ratio per SD.
+        """
         import matplotlib.pyplot as plt
+        from matplotlib.colors import LinearSegmentedColormap, TwoSlopeNorm
+        from matplotlib.lines import Line2D
+        from matplotlib.patches import Circle, Wedge
 
         t = self.cell_results
-        if "level" in t.columns:
-            t = t[t["level"] == self.levels[1]]
-        fr = sorted(t["from"].unique()); to = sorted(t["to"].unique())
-        ax = ax or plt.figure(figsize=(0.45 * len(to) + 2.5, 0.45 * len(fr) + 1.5)).gca()
-        x = t["to"].map({v: i for i, v in enumerate(to)}); y = t["from"].map({v: i for i, v in enumerate(fr)})
-        col = t["log_hr_sd"] if self.survival else t["excess_difference"]
-        lim = np.nanmax(np.abs(col)) or 1
-        sc = ax.scatter(x, y, c=col, cmap="RdBu_r", vmin=-lim, vmax=lim, s=20 + 40 * -np.log10(t["p_value"].clip(1e-10)),
-                        edgecolors=np.where(t["p_adj"] < cutoff, "black", "none"), linewidths=1.2)
-        ax.set_xticks(range(len(to)), to, rotation=90); ax.set_yticks(range(len(fr)), fr)
-        ax.set_xlabel("to (counted)"); ax.set_ylabel("from (centre)")
-        plt.colorbar(sc, ax=ax, label="log HR per SD" if self.survival else "difference in excess")
+        if self.survival:
+            pv, a, b = t["p_value"].to_numpy(float), t["log_hr_sd"].to_numpy(float), t["log_hr_sd"].to_numpy(float)
+            fr_, to_ = t["from"].to_numpy(), t["to"].to_numpy()
+        else:
+            cond = [c for c in self.p_value.columns if c.startswith("condition")]
+            coef = cond[0] if comparison_group is None else f"condition{comparison_group}"
+            if coef not in cond:
+                raise ValueError(f"comparison_group must be one of {[c[len('condition'):] for c in cond]}")
+            cf = self.coefficient
+            pv = self.p_value[coef].to_numpy(float)
+            a = cf["(Intercept)"].to_numpy(float)                 # reference condition
+            b = a + cf[coef].to_numpy(float)                      # comparison condition
+            ft = self.p_value.index.to_series().str.split("__", n=1, expand=True)
+            fr_, to_ = ft[0].to_numpy(), ft[1].to_numpy()
+        if fdr:
+            pv = p_adjust_bh(pv)
+        sig = pv < cutoff
+        size = -np.log10(pv)
+        marks = sorted(set(fr_) | set(to_)) if marks_to_plot is None else list(marks_to_plot)
+        keep = np.isin(fr_, marks) & np.isin(to_, marks)
+        xs = sorted(set(to_[keep])); ys = sorted(set(fr_[keep]))
+        xi = {v: k for k, v in enumerate(xs)}; yi = {v: k for k, v in enumerate(ys)}
+
+        vals = np.concatenate([a[keep], b[keep]])
+        if breaks is None:
+            lo, hi = np.round(np.nanmin(vals), 1), np.round(np.nanmax(vals), 1)
+            ticks = np.linspace(lo, hi, 6)
+        else:
+            lo, hi = breaks[0], breaks[1]
+            ticks = np.arange(lo, hi + breaks[2] / 2, breaks[2])
+        lo, hi = min(lo, -1e-9), max(hi, 1e-9)                   # the scale is centred on 0
+        cmap = LinearSegmentedColormap.from_list("spicy", list(colours))
+        norm = TwoSlopeNorm(vcenter=0.0, vmin=lo, vmax=hi)
+        smax = np.nanmax(size[keep]) if keep.any() else 1.0
+
+        if ax is None:
+            fig = plt.figure(figsize=(0.42 * len(xs) + 2.6, 0.42 * len(ys) + 1.6), layout="constrained")
+            ax = fig.gca()
+        for k in np.flatnonzero(keep):
+            if not np.isfinite(size[k]):
+                continue
+            x, y = xi[to_[k]], yi[fr_[k]]
+            rad = max(size[k] / smax / 2, 0.15)
+            ca = cmap(norm(np.clip(a[k], lo, hi))); cb = cmap(norm(np.clip(b[k], lo, hi)))
+            ax.add_patch(Wedge((x, y), rad, 90, 270, facecolor=ca, edgecolor="none"))     # left: reference
+            ax.add_patch(Wedge((x, y), rad, -90, 90, facecolor=cb, edgecolor="none"))     # right: comparison
+            if sig[k]:
+                ax.add_patch(Circle((x, y), rad, fill=False, edgecolor="black", linewidth=1))
+        ax.set_xlim(-0.6, len(xs) - 0.4); ax.set_ylim(-0.6, len(ys) - 0.4)
+        ax.set_aspect("equal")
+        ax.set_xticks(range(len(xs)), xs, rotation=45, ha="right"); ax.set_yticks(range(len(ys)), ys)
+        ax.set_xlabel("Cell type j (to)"); ax.set_ylabel("Cell type i (from)")
+        for side in ("top", "right"):
+            ax.spines[side].set_visible(False)
+
+        sm = plt.cm.ScalarMappable(norm=norm, cmap=cmap)
+        cbar = plt.colorbar(sm, ax=ax, fraction=0.04, pad=0.02, ticks=ticks)
+        labels = [f"{v:.3g}" for v in ticks]
+        labels[0], labels[-1] = "avoidance", "attraction"
+        cbar.set_ticklabels(labels)
+        cbar.set_label("log HR per SD" if self.survival else "Localisation (excess)")
+
+        # legends: significance ring, -log10 p sizes, and (two conditions) which half is which
+        handles = [Line2D([], [], marker="o", ls="", markerfacecolor="none", markeredgecolor="black", markersize=10,
+                          label=("fdr" if fdr else "p-value") + f" < {cutoff}")]
+        for q in np.unique(np.round(np.linspace(smax / 4, smax, 3), 1)):
+            handles.append(Line2D([], [], marker="o", ls="", color="grey", alpha=0.6,
+                                  markersize=2 * 18 * max(q / smax / 2, 0.15), label=f"{q:g}"))
+        fig = ax.figure
+        leg = fig.legend(handles=handles[1:], title="-log10 p", loc="upper left", bbox_to_anchor=(1.0, 0.95),
+                         frameon=False, fontsize=8, title_fontsize=9, labelspacing=1.2, borderpad=0.2)
+        fig.legend(handles=handles[:1], loc="upper left", bbox_to_anchor=(1.0, 0.55), frameon=False, fontsize=8)
+        if not self.survival:
+            # which half is which condition: half-disc symbols, as spicyR's legend
+            from matplotlib.legend_handler import HandlerBase
+
+            class _Half(HandlerBase):
+                def __init__(self, left):
+                    super().__init__()
+                    self.left = left
+
+                def create_artists(self, legend, orig, x0, y0, width, height, fontsize, trans):
+                    r = 0.45 * height
+                    th = (90, 270) if self.left else (-90, 90)
+                    return [Wedge((x0 + width / 2, y0 + height / 2), r, *th, facecolor="grey", transform=trans)]
+
+            ref, comp = self.levels[0], coef[len("condition"):]
+            hl, hr = Line2D([], []), Line2D([], [])
+            fig.legend(handles=[hl, hr], labels=[ref, comp], handler_map={hl: _Half(True), hr: _Half(False)},
+                       title="Condition", loc="upper left", bbox_to_anchor=(1.0, 0.42), frameon=False,
+                       fontsize=8, title_fontsize=9, handleheight=1.6, handlelength=1.6)
         return ax
 
     def __repr__(self):
