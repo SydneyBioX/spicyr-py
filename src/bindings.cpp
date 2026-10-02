@@ -56,7 +56,7 @@ py::dict rows_to(const ImageRows& r) {
 py::dict design_dict(const DesignResult& d) {
   py::dict o;
   o["ok"] = d.ok; o["reason"] = d.reason; o["theta"] = arr(d.theta); o["estimate"] = d.estimate; o["se"] = d.se;
-  o["df"] = d.df; o["p"] = d.p; o["tau2"] = d.tau2;
+  o["df"] = d.df; o["p"] = d.p; o["tau2"] = d.tau2; o["influence"] = arr(d.influence);
   return o;
 }
 
@@ -104,6 +104,7 @@ PYBIND11_MODULE(_core, m) {
     o["ok"] = r.ok; o["reason"] = r.reason; o["coef_ref"] = r.coef_ref; o["coef_comp"] = r.coef_comp;
     o["difference"] = r.difference; o["se"] = r.se; o["df"] = r.df; o["p"] = r.p; o["tau2"] = r.tau2;
     o["influence"] = arr(r.influence); o["unit_summary"] = arr(r.unit_summary); o["unit_info"] = arr(r.unit_info);
+    o["image_weight"] = arr(r.image_weight);
     return o;
   });
 
@@ -111,6 +112,17 @@ PYBIND11_MODULE(_core, m) {
                           const DoubleArray& contrast, double tau2) {
     int q = static_cast<int>(contrast.size());
     return design_dict(design_test(rows_from(rows), vec<int>(unit), n_units, vec<double>(Z), q, vec<double>(contrast), tau2));
+  });
+
+  m.def("design_tests", [](const py::dict& rows, const IntArray& unit, int n_units, const DoubleArray& Z,
+                           const DoubleArray& contrasts, int k, double tau2, bool hartung_knapp) {
+    // Z: row-major images x q; contrasts: row-major k x q
+    int q = static_cast<int>(contrasts.size() / k);
+    std::vector<DesignResult> r = design_tests(rows_from(rows), vec<int>(unit), n_units, vec<double>(Z), q,
+                                               vec<double>(contrasts), k, tau2, hartung_knapp);
+    py::list out;
+    for (const auto& d : r) out.append(design_dict(d));
+    return out;
   });
 
   m.def("availability_test", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_units,
@@ -127,8 +139,9 @@ PYBIND11_MODULE(_core, m) {
   });
 
   m.def("survival_test", [](const py::dict& rows, const IntArray& unit, int n_units, const DoubleArray& M,
-                            const DoubleArray& time, const IntArray& event) {
-    SurvivalResult r = survival_test(rows_from(rows), vec<int>(unit), n_units, vec<double>(M), vec<double>(time), vec<int>(event));
+                            const DoubleArray& time, const IntArray& event, const DoubleArray& x) {
+    SurvivalResult r = survival_test(rows_from(rows), vec<int>(unit), n_units, vec<double>(M), vec<double>(time), vec<int>(event),
+                                     vec<double>(x));
     py::dict o;
     o["ok"] = r.ok; o["reason"] = r.reason; o["score_coef"] = r.score_coef; o["score_se"] = r.score_se;
     o["score_df"] = r.score_df; o["score_p"] = r.score_p; o["log_hr_sd"] = r.log_hr_sd; o["hr_sd"] = r.hr_sd;

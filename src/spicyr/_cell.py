@@ -161,143 +161,202 @@ def _subset_rows(rows, keep) -> dict:
 
 
 def _share(ctx, rows, f):
+    """The log share of the counted type in each image row (the abundance covariate)."""
     i = rows["img"]
     return np.log(np.maximum(ctx.counts[i, ctx.type_labels.index(f)], 0.5) / ctx.counts.sum(axis=1)[i])
 
 
-def cell_pair_test(ctx, g, f, t, frailty, variance, availability, Z_extra=None) -> dict:
+def _design(ctx, rows, f, adjust, Z_extra, extra_names):
+    """The design of the main test: one indicator per condition, then the centred log share of the counted type
+    (adjust) and the centred covariates. Images with a missing covariate are left out. None when there is
+    nothing to adjust for."""
+    cols, names = [], []
+    if adjust:
+        s = _share(ctx, rows, f)
+        if len(s) > 1 and np.var(s, ddof=1) > 0:
+            cols.append(s[:, None])
+            names.append("abundance")
+    keep = np.ones(len(rows["img"]), dtype=bool)
+    if Z_extra is not None:
+        ze = Z_extra[rows["img"], :]
+        keep = np.all(np.isfinite(ze), axis=1)
+        cols.append(ze)
+        names += list(extra_names)
+    if not cols:
+        return None
+    X = np.column_stack(cols)[keep]
+    X = X - X.mean(axis=0)
+    rw = _subset_rows(rows, keep)
+    G = len(ctx.levels)
+    Zg = (rw["group"][:, None] == np.arange(G)[None, :]).astype(float)
+    parts = (["abundance"] if "abundance" in names[:1] else []) + (["covariates"] if Z_extra is not None else [])
+    return {"rows": rw, "Z": np.column_stack([Zg, X]), "extra": names, "adjusted_for": "+".join(parts)}
+
+
+def _design_tau2(d, G, frailty, tau2):
+    """tau2 of the adjusted design: re-estimated when every added column is constant within patients, else held at
+    the unadjusted value (new_methods.pdf, Remark 3)."""
+    if not frailty:
+        return 0.0
+    X = d["Z"][:, G:]
+    unit = d["rows"]["unit"]
+    patient_level = all(pd.Series(X[:, j]).groupby(unit).nunique().eq(1).all() for j in range(X.shape[1]))
+    return -1.0 if patient_level else float(tau2)
+
+
+def _contrasts(G, q):
+    """The level differences, then one row per added column (its effect)."""
+    C = np.zeros((G - 1 + q - G, q))
+    for l in range(1, G):
+        C[l - 1, 0], C[l - 1, l] = -1.0, 1.0
+    for j in range(q - G):
+        C[G - 1 + j, G + j] = 1.0
+    return C
+
+
+def _design_tests(rows, m, Z, C, tau2, hk):
+    return _core.design_tests(rows, rows["unit"], m, Z, C, C.shape[0], tau2, hk)
+
+
+def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_names=()) -> dict:
     rows = cell_rows(ctx, g, f, t)
     if len(ctx.levels) > 2:
-        return cell_pair_test_levels(ctx, rows, f, t, frailty, availability, Z_extra)
+        return cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names)
     m = len(ctx.unit_labels)
     r = _core.excess_test(rows, rows["unit"], rows["group"], m, frailty, variance)
-    out = {"from": f, "to": t, "ok": r["ok"], "reason": r["reason"], "rows": rows, "test": r}
+    out = {"from": f, "to": t, "ok": r["ok"], "reason": r["reason"], "rows": rows, "test": r, "unadjusted": r,
+           "adjusted_for": "none"}
     if not r["ok"]:
         return out
-    if Z_extra is not None:
-        # images with a missing covariate are left out of the covariate model
-        ze = Z_extra[rows["img"], :]
-        cc = np.all(np.isfinite(ze), axis=1)
-        rc = _subset_rows(rows, cc)
-        ze = ze[cc]
-        Z = np.column_stack([rc["group"] == 0, rc["group"] == 1, ze]).astype(float)
-        patient_level = all(pd.Series(ze[:, j]).groupby(rc["unit"]).nunique().eq(1).all() for j in range(ze.shape[1]))
-        cvec = np.concatenate([[-1.0, 1.0], np.zeros(ze.shape[1])])
-        out["covariate"] = _core.design_test(rc, rc["unit"], m, Z, cvec, -1.0 if patient_level else r["tau2"])
-    if availability:
-        share = _share(ctx, rows, f)
-        out["availability"] = (_core.availability_test(rows, rows["unit"], rows["group"], m, share, r["tau2"])
-                               if np.var(share, ddof=1) > 0 else {"ok": False, "reason": "share_constant"})
+    d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
+    if d is None:
+        return out
+    a = _design_tests(d["rows"], m, d["Z"], _contrasts(2, d["Z"].shape[1]), _design_tau2(d, 2, frailty, r["tau2"]),
+                      variance == "hartung_knapp")
+    # a design that is not of full rank (e.g. a covariate confounded with the condition): the unadjusted test
+    if not a[0]["ok"]:
+        out["adjusted_for"] = f"none ({a[0]['reason']})"
+        return out
+    x = a[0]
+    out["test"] = {"coef_ref": x["theta"][0], "coef_comp": x["theta"][1], "difference": x["estimate"], "se": x["se"],
+                   "df": x["df"], "p": x["p"], "tau2": x["tau2"], "influence": x["influence"]}
+    out["effects"] = dict(zip(d["extra"], a[1:]))
+    out["adjusted_for"] = d["adjusted_for"]
     return out
 
 
-def cell_pair_test_levels(ctx, rows, f, t, frailty, availability, Z_extra) -> dict:
+def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names) -> dict:
+    """More than two conditions: one design with an indicator per level, each level tested against the reference
+    (the first level), with the same adjustments as for two conditions."""
     G = len(ctx.levels)
     m = len(ctx.unit_labels)
-    out = {"from": f, "to": t, "ok": False, "rows": rows, "levels": ctx.levels}
+    hk = variance == "hartung_knapp"
+    out = {"from": f, "to": t, "ok": False, "rows": rows, "levels": ctx.levels, "adjusted_for": "none"}
     per_level = pd.Series(rows["unit"]).groupby(rows["group"]).nunique().reindex(range(G))
     if per_level.isna().any() or (per_level < 2).any():
         out["reason"] = "one_patient_per_group"
         return out
     Zg = (rows["group"][:, None] == np.arange(G)[None, :]).astype(float)
-
-    def fit(Z, tau2, rw=rows):
-        q = Z.shape[1]
-        tau = tau2
-        res = {}
-        for l in range(1, G):
-            cvec = np.zeros(q)
-            cvec[0], cvec[l] = -1.0, 1.0
-            d = _core.design_test(rw, rw["unit"], m, Z, cvec, tau)
-            if not d["ok"]:
-                return None
-            tau = d["tau2"]
-            res[ctx.levels[l]] = d
-        return res
-
-    d = fit(Zg, -1.0 if frailty else 0.0)
-    if d is None:
+    u = _design_tests(rows, m, Zg, _contrasts(G, G), -1.0 if frailty else 0.0, hk)
+    if not u[0]["ok"]:
         out["reason"] = "design_not_full_rank"
         return out
-    first = next(iter(d.values()))
-    out.update(ok=True, levels_test=d, test={"coef_ref": first["theta"][0], "tau2": first["tau2"]})
-    if Z_extra is not None:
-        cc = np.all(np.isfinite(Z_extra[rows["img"], :]), axis=1)
-        rc = _subset_rows(rows, cc)
-        out["covariate_levels"] = fit(np.column_stack([Zg[cc], Z_extra[rc["img"], :]]), first["tau2"], rc)
-    if availability:
-        share = _share(ctx, rows, f)
-        if np.var(share, ddof=1) > 0:
-            out["availability_levels"] = fit(np.column_stack([Zg, share - share.mean()]), first["tau2"])
+    un = dict(zip(ctx.levels[1:], u))
+    out.update(ok=True, levels_test=un, unadjusted_levels=un, test={"coef_ref": u[0]["theta"][0], "tau2": u[0]["tau2"]})
+    d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
+    if d is None:
+        return out
+    a = _design_tests(d["rows"], m, d["Z"], _contrasts(G, d["Z"].shape[1]), _design_tau2(d, G, frailty, u[0]["tau2"]), hk)
+    if not a[0]["ok"]:
+        out["adjusted_for"] = f"none ({a[0]['reason']})"
+        return out
+    out["levels_test"] = dict(zip(ctx.levels[1:], a[:G - 1]))
+    out["effects"] = dict(zip(d["extra"], a[G - 1:]))
+    out["test"] = {"coef_ref": a[0]["theta"][0], "tau2": a[0]["tau2"]}
+    out["adjusted_for"] = d["adjusted_for"]
     return out
 
 
-def _num(z, name):
-    return np.nan if (z is None or not z.get("ok", False)) else z[name]
+def _effect_names(fits):
+    return list(dict.fromkeys(nm for o in fits for nm in o.get("effects", {})))
 
 
-def cell_table(fits, ctx, availability, covariates) -> pd.DataFrame | None:
+def _add_effects(row, o, enames):
+    for nm in enames:
+        e = o.get("effects", {}).get(nm)
+        ok = e is not None and e["ok"]
+        row[f"{nm}_effect"] = e["estimate"] if ok else np.nan
+        row[f"{nm}_p_value"] = e["p"] if ok else np.nan
+    return row
+
+
+FIRST_COLUMNS = ["from", "to", "level", "r", "excess_ref", "excess_comp", "excess_difference", "se", "df", "p_value",
+                 "p_adj", "p_value_best_radius", "tau2", "adjusted_for"]
+
+
+def order_columns(tab):
+    """The main test first, then what it was adjusted for and the effects, then the unadjusted test."""
+    first = [c for c in FIRST_COLUMNS if c in tab.columns]
+    un = [c for c in tab.columns if c.startswith("unadjusted_")]
+    return tab[first + [c for c in tab.columns if c not in first and c not in un] + un]
+
+
+def cell_table(fits, ctx, adjusted) -> pd.DataFrame | None:
     if len(ctx.levels) > 2:
-        return cell_table_levels(fits, ctx, availability, covariates)
+        return cell_table_levels(fits, ctx, adjusted)
+    ok = [o for o in fits if o["ok"]]
+    enames = _effect_names(ok)
     rows = []
-    for o in fits:
-        if not o["ok"]:
-            continue
+    for o in ok:
         x = o["test"]
         row = {"from": o["from"], "to": o["to"], "excess_ref": x["coef_ref"], "excess_comp": x["coef_comp"],
                "excess_difference": x["difference"], "se": x["se"], "df": x["df"], "p_value": x["p"], "tau2": x["tau2"]}
-        if availability:
-            a = o.get("availability")
-            row.update(adjusted_difference=_num(a, "estimate"), adjusted_se=_num(a, "se"), adjusted_df=_num(a, "df"),
-                       adjusted_p_value=_num(a, "p"))
-        if covariates is not None:
-            c = o.get("covariate")
-            row.update(covariate_difference=_num(c, "estimate"), covariate_se=_num(c, "se"),
-                       covariate_df=_num(c, "df"), covariate_p_value=_num(c, "p"))
+        if adjusted:
+            row["adjusted_for"] = o["adjusted_for"]
+            _add_effects(row, o, enames)
+            u = o["unadjusted"]
+            row.update(unadjusted_difference=u["difference"], unadjusted_se=u["se"], unadjusted_df=u["df"],
+                       unadjusted_p_value=u["p"])
         rows.append(row)
     if not rows:
         return None
     tab = pd.DataFrame(rows)
     tab["p_adj"] = p_adjust_bh(tab["p_value"])
-    if availability:
-        tab["adjusted_p_adj"] = p_adjust_bh(tab["adjusted_p_value"])
-    if covariates is not None:
-        tab["covariate_p_adj"] = p_adjust_bh(tab["covariate_p_value"])
+    if adjusted:
+        tab["unadjusted_p_adj"] = p_adjust_bh(tab["unadjusted_p_value"])
     tab.index = tab["from"] + "__" + tab["to"]
-    return tab
+    return order_columns(tab)
 
 
-def cell_table_levels(fits, ctx, availability, covariates) -> pd.DataFrame | None:
-    def num(z, l, nm):
-        return np.nan if (z is None or l not in z) else z[l][nm]
-
+def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
+    """More than two conditions: one row per pair and level (contrast with the reference level)."""
+    ok = [o for o in fits if o["ok"]]
+    enames = _effect_names(ok)
     rows = []
-    for o in fits:
-        if not o["ok"]:
-            continue
+    for o in ok:
         for l, d in o["levels_test"].items():
             row = {"from": o["from"], "to": o["to"], "level": l, "excess_ref": d["theta"][0],
                    "excess_difference": d["estimate"], "se": d["se"], "df": d["df"], "p_value": d["p"], "tau2": d["tau2"]}
-            if availability:
-                row["adjusted_difference"] = num(o.get("availability_levels"), l, "estimate")
-                row["adjusted_p_value"] = num(o.get("availability_levels"), l, "p")
-            if covariates is not None:
-                row["covariate_difference"] = num(o.get("covariate_levels"), l, "estimate")
-                row["covariate_p_value"] = num(o.get("covariate_levels"), l, "p")
+            if adjusted:
+                row["adjusted_for"] = o["adjusted_for"]
+                _add_effects(row, o, enames)
+                u = o["unadjusted_levels"][l]
+                row.update(unadjusted_difference=u["estimate"], unadjusted_se=u["se"], unadjusted_df=u["df"],
+                           unadjusted_p_value=u["p"])
             rows.append(row)
     if not rows:
         return None
     tab = pd.DataFrame(rows)
     tab["p_adj"] = np.nan
-    if availability:
-        tab["adjusted_p_adj"] = np.nan
+    if adjusted:
+        tab["unadjusted_p_adj"] = np.nan
     for l in tab["level"].unique():
         k = (tab["level"] == l).to_numpy()
         tab.loc[k, "p_adj"] = p_adjust_bh(tab.loc[k, "p_value"])
-        if availability:
-            tab.loc[k, "adjusted_p_adj"] = p_adjust_bh(tab.loc[k, "adjusted_p_value"])
+        if adjusted:
+            tab.loc[k, "unadjusted_p_adj"] = p_adjust_bh(tab.loc[k, "unadjusted_p_value"])
     tab.index = tab["from"] + "__" + tab["to"] + "__" + tab["level"]
-    return tab
+    return order_columns(tab)
 
 
 def cell_image_excess(fits, ctx) -> dict:
@@ -307,5 +366,18 @@ def cell_image_excess(fits, ctx) -> dict:
         rows = o.get("rows")
         if rows is not None and len(rows["img"]):
             v[rows["img"]] = (rows["O"] - rows["E"]) / rows["n"]
+        out[f"{o['from']}__{o['to']}"] = v
+    return out
+
+
+def cell_image_weight(fits, ctx) -> dict:
+    """Per-image weight of every pair: the image's share of its condition's information in the frailty model (sums
+    to 1 within each condition); NaN where the pair was not tested."""
+    out = {}
+    for o in fits:
+        v = np.full(ctx.n_images, np.nan)
+        w = (o.get("unadjusted") or {}).get("image_weight")
+        if w is not None and len(w):
+            v[o["rows"]["img"]] = w
         out[f"{o['from']}__{o['to']}"] = v
     return out

@@ -24,9 +24,11 @@ utils::write.csv(cells, file.path(out_dir, "cells.csv"), row.names = FALSE)
 
 cases <- list(
   two_groups = list(condition = "condition", subject = "patient", r = 30),
+  unadjusted = list(condition = "condition", subject = "patient", r = 30, adjustAbundance = FALSE),
   hk_no_clustering = list(condition = "condition", subject = "patient", r = 30, variance = "hartung_knapp", labelClustering = FALSE),
   images_as_units = list(condition = "condition", r = 30, from = "tumour", to = c("T", "B")),
   three_levels = list(condition = "stage", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B")),
+  three_levels_covariates = list(condition = "stage", subject = "patient", r = 30, from = "tumour", to = c("T", "B"), covariates = c("age", "batch")),
   covariates = list(condition = "condition", subject = "patient", r = 30, covariates = c("age", "batch"), from = "tumour"),
   knn = list(condition = "condition", subject = "patient", k = 10, from = c("tumour", "macro"), to = c("T", "B")),
   radii_maxT = list(condition = "condition", subject = "patient", r = c(10, 20, 40), from = "tumour", to = c("T", "B", "macro")),

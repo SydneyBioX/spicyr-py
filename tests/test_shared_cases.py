@@ -13,7 +13,7 @@ import spicyr
 HERE = Path(__file__).parent / "shared_cases"
 CELLS = pd.read_csv(HERE / "cells.csv")
 CASES = json.loads((HERE / "cases.json").read_text())
-R_TO_PY = {"labelClustering": "label_clustering", "from": "from_"}
+R_TO_PY = {"labelClustering": "label_clustering", "from": "from_", "adjustAbundance": "adjust_abundance"}
 
 
 def run(args):

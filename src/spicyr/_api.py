@@ -13,7 +13,7 @@ from ._results import SpicyResults
 
 def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageID", cell_type="cellType",
           spatial_coords=("x", "y"), r=None, from_=None, to=None, method="cell", k=None, combine="maxT",
-          availability=True, variance="cr2", frailty=True, label_clustering=True, ref=None, cores=1,
+          adjust_abundance=True, variance="cr2", frailty=True, label_clustering=True, ref=None, cores=1,
           survival=None, table_key="table", **kwargs) -> SpicyResults:
     """Test, for every ordered pair of cell types ``from_ -> to``, whether their co-localisation differs between
     conditions, or is associated with survival.
@@ -21,11 +21,12 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
     The effect is the **excess**: the number of extra ``to`` cells within ``r`` of each ``from`` cell, beyond
     random labelling of the observed cells. Images are combined within patients (``subject``) and patients within
     conditions by a frailty GEE, and the difference is tested with a CR2 variance on Satterthwaite degrees of
-    freedom, with **patients as the units**. The results also give the difference at equal availability of the
-    ``to`` type (``adjusted_*`` columns).
+    freedom, with **patients as the units**. By default the difference is adjusted for how common the ``to`` type
+    is in each image (the log of its share of all cells) and for any ``covariates``, so that a change in abundance
+    alone does not appear as a change in co-localisation. The unadjusted test is reported alongside
+    (``unadjusted_*`` columns).
 
-    This is the Python version of ``spicyR::spicy()``, on the same C++ code and with the same results. ``from`` is
-    spelled ``from_`` because ``from`` is a Python keyword (``**{"from": ...}`` also works).
+    ``from`` is spelled ``from_`` because ``from`` is a Python keyword (``**{"from": ...}`` also works).
 
     Parameters
     ----------
@@ -38,7 +39,8 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
         Column of the patient of each image. Images of one patient are combined; by default each image is a
         patient.
     covariates
-        Image- or patient-level columns to adjust for.
+        Image- or patient-level columns to adjust for. The effect of each is reported as ``<column>_effect`` and
+        ``<column>_p_value`` (one column per level after the first for a categorical covariate).
     r
         Radius, or several radii combined by ``combine`` ("maxT" or "cauchy"). Default 50.
     from_, to
@@ -47,8 +49,9 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
         "cell" (spicyR Cell). The image-level method of spicyR is not yet available in Python.
     k
         Use the ``k`` nearest neighbours instead of a radius.
-    availability
-        Also report the difference at equal availability of the ``to`` type.
+    adjust_abundance
+        Adjust the test for the log share of the ``to`` type in each image (default ``True``). Its effect is
+        reported as ``abundance_effect``. ``False`` gives the test without it.
     variance
         "cr2" (default) or "hartung_knapp" (for very few patients).
     survival
@@ -93,94 +96,106 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
     ctx = _cell.cell_context(df, None if is_surv else condition, subject, ref=ref, survival=is_surv)
     pheno = ctx.df.iloc[ctx.first].reset_index(drop=True)
 
-    Z_extra = None
+    Z_extra, extra_names = None, []
     if covariates is not None:
         covariates = [covariates] if isinstance(covariates, str) else list(covariates)
         miss = [c for c in covariates if c not in pheno.columns]
         if miss:
             raise ValueError(f"covariates not found: {miss}")
-        Z_extra = _model_matrix(pheno, covariates)          # NaN rows where a covariate is missing
+        Z_extra, extra_names = _model_matrix(pheno, covariates)          # NaN rows where a covariate is missing
         Z_extra = Z_extra - np.nanmean(Z_extra, axis=0)
 
     radii = [np.nan] if k is not None else sorted(set(np.atleast_1d(r).astype(float)))
     if len(radii) > 1 and not is_surv and len(ctx.levels) > 2:
         raise ValueError("several radii are supported for two conditions; give one `r`.")
     if is_surv:
-        res = _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores)
+        res = _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, adjust_abundance)
     else:
         per_r = []
         for rr in radii:
             g = _cell.cell_graph(ctx, pairs, r=None if np.isnan(rr) else rr, k=k, label_clustering=label_clustering,
                                  n_threads=cores)
-            per_r.append([_cell.cell_pair_test(ctx, g, p[0], p[1], frailty, variance, availability, Z_extra) for p in pairs])
-        res = _combine(per_r, radii, ctx, availability, covariates, combine)
+            per_r.append([_cell.cell_pair_test(ctx, g, p[0], p[1], frailty, variance, adjust_abundance, Z_extra, extra_names)
+                          for p in pairs])
+        res = _combine(per_r, radii, ctx, adjust_abundance or covariates is not None, combine)
     return _results(res, ctx, pheno, condition, subject, is_surv, radii, k)
 
 
-def _model_matrix(pheno, covariates) -> np.ndarray:
-    """R's model.matrix(~ covariates)[, -1] with treatment contrasts (levels sorted, the first dropped)."""
-    cols = []
+def _model_matrix(pheno, covariates):
+    """R's model.matrix(~ covariates)[, -1] with treatment contrasts (levels sorted, the first dropped), and its
+    column names (the covariate, followed by the level for a categorical one)."""
+    cols, names = [], []
     for c in covariates:
         v = pheno[c]
         if pd.api.types.is_numeric_dtype(v) and not isinstance(v.dtype, pd.CategoricalDtype):
             cols.append(v.to_numpy(float)[:, None])
+            names.append(c)
         else:
             lev = _cell.condition_levels(v)
             d = np.column_stack([(v.astype(str) == l).to_numpy(float) for l in lev[1:]])
             d[v.isna().to_numpy()] = np.nan
             cols.append(d)
-    return np.column_stack(cols)
+            names += [f"{c}{l}" for l in lev[1:]]
+    return np.column_stack(cols), names
 
 
-def _combine(per_r, radii, ctx, availability, covariates, combine):
-    tabs = [_cell.cell_table(fs, ctx, availability, covariates) for fs in per_r]
+def _combine(per_r, radii, ctx, adjusted, combine):
+    """Several radii: per-radius tables, and one row per pair with the combined p-value (the main test and, when
+    adjusted, the unadjusted test). The other columns are those of the radius chosen by max-T."""
+    tabs = [_cell.cell_table(fs, ctx, adjusted) for fs in per_r]
     if len(radii) == 1:
         return {"table": tabs[0], "fits": per_r[0]}
     long = pd.concat([t.assign(r=rr) for t, rr in zip(tabs, radii) if t is not None])
     long = long[["r"] + [c for c in long.columns if c != "r"]]
     keys = long[["from", "to"]].drop_duplicates()
-    rows = []
-    for f, t in keys.itertuples(index=False):
-        tests = []
-        for fs in per_r:
-            o = next(z for z in fs if z["from"] == f and z["to"] == t)
-            tests.append(o["test"] if o["ok"] else None)
+
+    def comb(tests):
         ok = [i for i, z in enumerate(tests) if z is not None]
         if not ok:
-            continue
+            return None
         tt = np.array([tests[i]["difference"] / tests[i]["se"] for i in ok])
         df_ = np.array([tests[i]["df"] for i in ok])
         pv = np.array([tests[i]["p"] for i in ok])
         if combine == "maxT":
-            infl = [list(tests[i]["influence"]) for i in ok]
-            p, best = _core.max_t(infl, tt, df_)
+            p, best = _core.max_t([list(tests[i]["influence"]) for i in ok], tt, df_)
         else:
             best = int(np.argmin(pv))
             p = _core.cauchy_combine(pv)
-        z = tests[ok[best]]
-        rows.append({"from": f, "to": t, "r": radii[ok[best]], "excess_ref": z["coef_ref"], "excess_comp": z["coef_comp"],
-                     "excess_difference": z["difference"], "se": z["se"], "df": z["df"], "p_value": p, "tau2": z["tau2"],
-                     "p_value_best_radius": pv[best]})
+        return ok[best], p, pv[best]
+
+    rows = []
+    for f, t in keys.itertuples(index=False):
+        fit_at = []
+        for fs in per_r:
+            o = next(z for z in fs if z["from"] == f and z["to"] == t)
+            fit_at.append(o if o["ok"] else None)
+        c = comb([None if o is None else o["test"] for o in fit_at])
+        if c is None:
+            continue
+        best, p, p_best = c
+        row = long[(long["from"] == f) & (long["to"] == t) & (long["r"] == radii[best])].iloc[0].to_dict()
+        row.update(p_value=p, p_value_best_radius=p_best)
+        if adjusted:
+            u = comb([None if o is None else o["unadjusted"] for o in fit_at])
+            row["unadjusted_p_value"] = np.nan if u is None else u[1]
+        rows.append(row)
     tab = pd.DataFrame(rows)
     tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
-    if availability:
-        key = long["from"] + "__" + long["to"]
-        adj = long.groupby(key, sort=False)["adjusted_p_value"].apply(
-            lambda p: _core.cauchy_combine(p[np.isfinite(p)].to_numpy()))
-        tab["adjusted_p_value"] = adj.reindex(tab["from"] + "__" + tab["to"]).to_numpy()
-        tab["adjusted_p_adj"] = _cell.p_adjust_bh(tab["adjusted_p_value"])
+    if adjusted:
+        tab["unadjusted_p_adj"] = _cell.p_adjust_bh(tab["unadjusted_p_value"])
+    tab = tab.drop(columns=[c for c in ("unadjusted_difference", "unadjusted_se", "unadjusted_df") if c in tab.columns])
     tab.index = tab["from"] + "__" + tab["to"]
     mid = int(np.argmin(np.abs(np.array(radii) - np.median(radii))))
-    return {"table": tab, "fits": per_r[mid], "radius_table": long}
+    return {"table": _cell.order_columns(tab), "fits": per_r[mid], "radius_table": long}
 
 
-def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores):
+def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, adjust):
     unit_first = np.array([int(np.argmax(ctx.image_unit == u)) for u in range(len(ctx.unit_labels))])
     time = pheno[".time"].to_numpy(float)[unit_first]
     event = pheno[".event"].to_numpy(float)[unit_first]
     if (pd.Series(pheno[".time"].to_numpy()).groupby(ctx.image_unit).nunique() > 1).any():
         raise ValueError("the survival outcome must be constant within each subject.")
-    W = np.zeros((len(time), 0)) if covariates is None else _model_matrix(pheno.iloc[unit_first].reset_index(drop=True), covariates)
+    W = np.zeros((len(time), 0)) if covariates is None else _model_matrix(pheno.iloc[unit_first].reset_index(drop=True), covariates)[0]
     ok_u = np.isfinite(time) & np.isfinite(event) & np.all(np.isfinite(W), axis=1)
     null = _core.cox_fit(time[ok_u], event[ok_u].astype(np.int32), W[ok_u].ravel(), W.shape[1])
     if not null["ok"]:
@@ -193,16 +208,27 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores):
     ev = np.where(np.isfinite(event), event, 0).astype(np.int32)
     for f, t in pairs:
         rws = _cell.cell_rows(ctx, g, f, t)
-        s = _core.survival_test(rws, rws["unit"], len(ctx.unit_labels), M, time, ev)
+        m = len(ctx.unit_labels)
+        u = _core.survival_test(rws, rws["unit"], m, M, time, ev, np.zeros(0))
+        x = _cell._share(ctx, rws, f) if adjust else np.zeros(0)
+        shared = not (len(x) > 1 and np.var(x, ddof=1) > 0)
+        s = u if shared else _core.survival_test(rws, rws["unit"], m, M, time, ev, x)
+        parts = ([] if shared else ["abundance"]) + ([] if covariates is None else ["covariates"])
         fits.append({"from": f, "to": t, "ok": s["ok"], "reason": s["reason"], "rows": rws, "surv": s})
         if s["ok"]:
             rows.append({"from": f, "to": t, "score_coefficient": s["score_coef"], "score_se": s["score_se"],
                          "score_df": s["score_df"], "p_value": s["score_p"], "hazard_ratio_sd": s["hr_sd"],
                          "log_hr_sd": s["log_hr_sd"], "log_hr_se": s["hr_se"], "hr_p_value": s["hr_p"],
-                         "log_hr_per_cell": s["log_hr_unit"], "tau2": s["tau2"]})
+                         "log_hr_per_cell": s["log_hr_unit"], "tau2": s["tau2"],
+                         "adjusted_for": "+".join(parts) or "none",
+                         "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
+                         "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan})
     tab = pd.DataFrame(rows) if rows else None
     if tab is not None:
         tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
+        tab["unadjusted_p_adj"] = _cell.p_adjust_bh(tab["unadjusted_p_value"])
+        if not adjust and covariates is None:
+            tab = tab.drop(columns=["adjusted_for"] + [c for c in tab.columns if c.startswith("unadjusted_")])
         tab.index = tab["from"] + "__" + tab["to"]
     return {"table": tab, "fits": fits}
 
@@ -227,8 +253,10 @@ def _results(res, ctx, pheno, condition, subject, survival, radii, k) -> SpicyRe
         raise ValueError("no pair could be tested (each condition needs at least two patients with both cell types).")
     pa = _cell.cell_image_excess(res["fits"], ctx)
     pa = {"__".join(reversed(key.split("__"))): v for key, v in pa.items()}
+    w = _cell.cell_image_weight(res["fits"], ctx)
+    w = {"__".join(reversed(key.split("__"))): v for key, v in w.items()}
     return SpicyResults(cell_results=tab, levels=ctx.levels, survival=survival,
                         radius_results=_swap(res.get("radius_table")), image_ids=list(ctx.image_labels),
                         condition=(None if survival else [ctx.levels[g] for g in ctx.image_group]),
                         subject=(None if subject is None else pheno[subject].astype(str).tolist()),
-                        pairwise_assoc=pa, r=None if k is not None else radii, k=k)
+                        pairwise_assoc=pa, image_weights=w, r=None if k is not None else radii, k=k)

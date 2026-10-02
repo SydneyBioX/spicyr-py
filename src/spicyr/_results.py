@@ -17,7 +17,9 @@ class SpicyResults:
     ``cell_results`` is the full table, one row per pair (and per level when there are more than two
     conditions): the excess in the reference condition (``excess_ref``) and the comparison condition, the
     difference, its standard error, Satterthwaite df, p-value and BH-adjusted p-value, the frailty variance
-    ``tau2``, and the availability-adjusted difference (``adjusted_*``). For survival: the score test
+    ``tau2``, what the test was adjusted for (``adjusted_for``), the effect and p-value of each adjustment
+    (``abundance_effect``, ``<covariate>_effect``, ...) and the unadjusted test (``unadjusted_*``).
+    ``image_weights`` gives, for every pair, each image's share of its condition's information. For survival: the score test
     (``score_coefficient``, ``p_value``) and the hazard ratio per SD of the shrunken excess.
     """
 
@@ -29,6 +31,7 @@ class SpicyResults:
     condition: list | None = None
     subject: list | None = None
     pairwise_assoc: dict = field(default_factory=dict)
+    image_weights: dict = field(default_factory=dict)
     r: list | None = None
     k: int | None = None
     method: str = "cell"
@@ -232,8 +235,13 @@ class SpicyResults:
             lines.append(f"Units: {len(self.image_ids)} images (no subject given: each image is a patient)")
         else:
             lines.append(f"Units: {len(set(self.subject))} patients with {len(self.image_ids)} images")
+        if "adjusted_for" in t.columns:
+            adj = [a for a in t["adjusted_for"].unique() if a != "none"]
+            parts = list(dict.fromkeys(p for a in adj for p in a.split("+")))
+            if parts:
+                lines.append(f"Adjusted for: {', '.join(parts)} (unadjusted test in the unadjusted_* columns)")
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
-        if "adjusted_p_adj" in t.columns:
-            sig += f" ({int((t['adjusted_p_adj'] < 0.05).sum())} after adjusting for abundance)"
+        if "unadjusted_p_adj" in t.columns:
+            sig += f" ({int((t['unadjusted_p_adj'] < 0.05).sum())} without adjustment)"
         lines += [sig, "See top_pairs() and .cell_results."]
         return "\n".join(lines)

@@ -4,6 +4,12 @@
     "subject": "patient",
     "r": 30
   },
+  "unadjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "adjustAbundance": false
+  },
   "hk_no_clustering": {
     "condition": "condition",
     "subject": "patient",
@@ -23,6 +29,14 @@
     "r": 30,
     "from": ["tumour", "T"],
     "to": ["T", "B"]
+  },
+  "three_levels_covariates": {
+    "condition": "stage",
+    "subject": "patient",
+    "r": 30,
+    "from": "tumour",
+    "to": ["T", "B"],
+    "covariates": ["age", "batch"]
   },
   "covariates": {
     "condition": "condition",
