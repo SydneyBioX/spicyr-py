@@ -117,7 +117,8 @@ class SpicyResults:
         """Bubble plot of every pair, as spicyR's ``signifPlot()``.
 
         Each pair is a disc at (to, from). Its left half is coloured by the excess in the reference condition and
-        its right half by the excess in the comparison condition; the radius grows with -log10 p, and a black
+        its right half by the excess in the comparison condition; the radius grows with -log10 p (the BH-adjusted p
+        with ``fdr=True``), and a black
         ring marks p (or, with ``fdr=True``, the BH-adjusted p) below ``cutoff``. ``breaks`` is
         ``(low, high, step)`` for the colour scale. For survival results each disc is one colour: the log hazard
         ratio per SD.
@@ -192,12 +193,12 @@ class SpicyResults:
 
         # legends: significance ring, -log10 p sizes, and (two conditions) which half is which
         handles = [Line2D([], [], marker="o", ls="", markerfacecolor="none", markeredgecolor="black", markersize=10,
-                          label=("fdr" if fdr else "p-value") + f" < {cutoff}")]
+                          label=("BH-adjusted p" if fdr else "p-value") + f" < {cutoff}")]
         for q in np.unique(np.round(np.linspace(smax / 4, smax, 3), 1)):
             handles.append(Line2D([], [], marker="o", ls="", color="grey", alpha=0.6,
                                   markersize=2 * 18 * max(q / smax / 2, 0.15), label=f"{q:g}"))
         fig = ax.figure
-        leg = fig.legend(handles=handles[1:], title="-log10 p", loc="upper left", bbox_to_anchor=(1.0, 0.95),
+        leg = fig.legend(handles=handles[1:], title="-log10 adjusted p" if fdr else "-log10 p", loc="upper left", bbox_to_anchor=(1.0, 0.95),
                          frameon=False, fontsize=8, title_fontsize=9, labelspacing=1.2, borderpad=0.2)
         fig.legend(handles=handles[:1], loc="upper left", bbox_to_anchor=(1.0, 0.55), frameon=False, fontsize=8)
         if not self.survival:
