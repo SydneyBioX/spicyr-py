@@ -108,8 +108,8 @@ class SpicyResults:
         ax.set_xticks(range(1, len(groups) + 1), groups)
         ax.axhline(0, color="grey", lw=0.8, ls="--")
         ax.set_xlabel("Condition")
-        ax.set_ylabel(f"Excess (extra {to} cells per {from_} cell)")
-        ax.set_title(f"{to} cells around {from_} cells")
+        ax.set_ylabel(f"Extra {to} per {from_}\n(beyond chance)")
+        ax.set_title(f"{to} around {from_}")
         return ax
 
     def signif_plot(self, fdr: bool = False, breaks=None, comparison_group: str | None = None,
@@ -180,7 +180,7 @@ class SpicyResults:
         ax.set_xlim(-0.6, len(xs) - 0.4); ax.set_ylim(-0.6, len(ys) - 0.4)
         ax.set_aspect("equal")
         ax.set_xticks(range(len(xs)), xs, rotation=45, ha="right"); ax.set_yticks(range(len(ys)), ys)
-        ax.set_xlabel("Cell type j (to)"); ax.set_ylabel("Cell type i (from)")
+        ax.set_xlabel("to (counted)"); ax.set_ylabel("from (centre)")
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
 

@@ -1,7 +1,7 @@
-"""spicyr: calibrated tests for changes in cell-type co-localisation between groups of patients.
+"""spicyr: test whether cell types co-localise differently between groups of patients.
 
-The Python twin of the Bioconductor package spicyR: the same C++ core, the same arguments and the same
-results. ``spicy()`` works with pandas DataFrames, AnnData and SpatialData objects.
+The Python version of the Bioconductor package spicyR, on the same C++ code. ``spicy()`` works with AnnData,
+SpatialData and pandas objects.
 """
 
 from ._api import spicy

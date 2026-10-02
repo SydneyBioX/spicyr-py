@@ -5,7 +5,7 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "spicyr"
 version = "1.99.0"
-description = "Calibrated tests for changes in cell-type co-localisation between groups of patients (the Python twin of the Bioconductor package spicyR)"
+description = "Test whether cell types co-localise differently between groups of patients (the Python version of the Bioconductor package spicyR)"
 readme = "README.md"
 license = "GPL-2.0-or-later"
 license-files = ["LICENSE"]

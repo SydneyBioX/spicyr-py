@@ -11,7 +11,7 @@ from ._input import format_data
 from ._results import SpicyResults
 
 
-def spicy(cells, condition, subject=None, covariates=None, image_id="imageID", cell_type="cellType",
+def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageID", cell_type="cellType",
           spatial_coords=("x", "y"), r=None, from_=None, to=None, method="cell", k=None, combine="maxT",
           availability=True, variance="cr2", frailty=True, label_clustering=True, ref=None, cores=1,
           survival=None, table_key="table", **kwargs) -> SpicyResults:
@@ -33,8 +33,7 @@ def spicy(cells, condition, subject=None, covariates=None, image_id="imageID", c
         A pandas DataFrame (one row per cell), an AnnData object (cells as observations; coordinates in
         ``obsm["spatial"]`` or obs columns) or a SpatialData object (its annotation table ``table_key``).
     condition
-        Column of the image-level condition (two or more groups). For survival, leave ``condition`` as the
-        name of the time column and pass ``survival=<event column>``.
+        Column of the image-level condition (two or more groups).
     subject
         Column of the patient of each image. Images of one patient are combined; by default each image is a
         patient.
@@ -53,7 +52,9 @@ def spicy(cells, condition, subject=None, covariates=None, image_id="imageID", c
     variance
         "cr2" (default) or "hartung_knapp" (for very few patients).
     survival
-        Column of the event indicator (1 = event); ``condition`` is then the follow-up time.
+        A survival outcome: ``(time_column, event_column)``, one value per patient (the R package's
+        ``Surv(time, event)``). Leave ``condition`` empty. (Older form: ``condition=time_column,
+        survival=event_column``.)
     """
     if "from" in kwargs:
         from_ = kwargs.pop("from")
@@ -73,6 +74,12 @@ def spicy(cells, condition, subject=None, covariates=None, image_id="imageID", c
     if subject is not None and subject not in df.columns:
         raise ValueError("`subject` column not found.")
     is_surv = survival is not None
+    if is_surv and not isinstance(survival, str):
+        if len(survival) != 2:
+            raise ValueError("survival must be (time_column, event_column).")
+        condition, survival = survival[0], survival[1]
+    if condition is None:
+        raise ValueError("give `condition` (the column of the groups) or `survival` (time and event columns).")
     types = list(dict.fromkeys(df["cellType"].astype(str)))
     bad = [t for t in ([from_] if isinstance(from_, str) else (from_ or [])) + ([to] if isinstance(to, str) else (to or []))
            if t not in types]
