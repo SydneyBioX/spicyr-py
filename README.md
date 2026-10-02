@@ -8,6 +8,8 @@ cases). It works directly with **SpatialData**, **AnnData** and **pandas** objec
 
 > Status: pre-release (1.99.0), developed alongside spicyR 2.0. The statistical methods are under review.
 
+**Documentation and tutorial: https://sydneybiox.github.io/spicyr-py**
+
 ## What it tests
 
 For every ordered pair of cell types *from* → *to*, spicyR Cell asks whether the number of *to* cells within

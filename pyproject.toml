@@ -31,11 +31,11 @@ anndata = ["anndata>=0.10"]
 spatialdata = ["spatialdata>=0.2", "anndata>=0.10"]
 plot = ["matplotlib>=3.7"]
 test = ["pytest>=7", "anndata>=0.10", "matplotlib>=3.7"]
-doc = ["sphinx>=7", "myst-nb", "sphinx-book-theme", "sphinx-autodoc-typehints"]
+doc = ["sphinx>=7", "myst-nb>=1", "sphinx-book-theme", "sphinx-autodoc-typehints", "ipykernel", "matplotlib>=3.7", "anndata>=0.10"]
 
 [project.urls]
 Homepage = "https://github.com/SydneyBioX/spicyr-py"
-Documentation = "https://spicyr-py.readthedocs.io"
+Documentation = "https://sydneybiox.github.io/spicyr-py"
 "R package (spicyR)" = "https://bioconductor.org/packages/spicyR"
 
 [tool.scikit-build]
