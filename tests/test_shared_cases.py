@@ -32,8 +32,14 @@ def test_case_matches_r(name):
     got = got.loc[exp.index]
     for col in exp.columns:
         if exp[col].dtype.kind in "fi":
-            np.testing.assert_allclose(got[col].to_numpy(float), exp[col].to_numpy(float), rtol=1e-7, atol=1e-10,
-                                       equal_nan=True, err_msg=f"{name}: {col}")
+            np.testing.assert_allclose(
+                got[col].to_numpy(float),
+                exp[col].to_numpy(float),
+                rtol=1e-7,
+                atol=1e-10,
+                equal_nan=True,
+                err_msg=f"{name}: {col}",
+            )
         else:
             assert (got[col].astype(str).to_numpy() == exp[col].astype(str).to_numpy()).all(), f"{name}: {col}"
     radii = HERE / f"{name}_radii.csv"

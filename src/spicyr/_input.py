@@ -1,5 +1,7 @@
-"""Inputs: a pandas DataFrame, an AnnData object or a SpatialData object, turned into one cell table with the
-standard columns imageID, cellType, x and y (as spicyR's ``.format_data()``)."""
+"""Inputs: a pandas DataFrame, an AnnData object or a SpatialData object, turned into one cell table.
+
+The table has the standard columns imageID, cellType, x and y (as spicyR's ``.format_data()``).
+"""
 
 from __future__ import annotations
 
@@ -23,9 +25,11 @@ def _from_anndata(adata, image_id, cell_type, spatial_coords, spatial_key="spati
 
 
 def _from_spatialdata(sdata, image_id, cell_type, spatial_coords, table_key="table", coordinate_system=None):
-    """The annotation table of a SpatialData object. Images are the table's regions (its region_key column)
-    unless `image_id` names another obs column; coordinates come from obsm["spatial"] or, failing that, from
-    the centroids of the annotated shapes or labels."""
+    """The annotation table of a SpatialData object.
+
+    Images are the table's regions (its region_key column) unless `image_id` names another obs column;
+    coordinates come from obsm["spatial"] or, failing that, from the centroids of the annotated shapes or labels.
+    """
     table = sdata.tables[table_key] if hasattr(sdata, "tables") else sdata.table
     attrs = table.uns.get("spatialdata_attrs", {})
     obs = table.obs.copy()
@@ -56,8 +60,10 @@ def _from_spatialdata(sdata, image_id, cell_type, spatial_coords, table_key="tab
 
 
 def format_data(cells, image_id="imageID", cell_type="cellType", spatial_coords=("x", "y"), table_key="table"):
-    """One row per cell with columns imageID, cellType, x, y (and every other column kept), ordered by image in
-    order of first appearance, as spicyR's ``.format_data()``."""
+    """One row per cell with columns imageID, cellType, x, y, and every other column kept.
+
+    Rows are ordered by image in order of first appearance, as spicyR's ``.format_data()``.
+    """
     kind = type(cells).__name__
     if kind == "SpatialData":
         df = _from_spatialdata(cells, image_id, cell_type, spatial_coords, table_key)
@@ -70,11 +76,18 @@ def format_data(cells, image_id="imageID", cell_type="cellType", spatial_coords=
     for col in (image_id, cell_type, *spatial_coords):
         if col not in df.columns:
             raise ValueError(f"column '{col}' not found; columns are: {list(df.columns)}")
-    needed = pd.DataFrame({"imageID": df[image_id].to_numpy(), "cellType": df[cell_type].to_numpy(),
-                           "x": df[spatial_coords[0]].to_numpy(float), "y": df[spatial_coords[1]].to_numpy(float)},
-                          index=df.index)
-    rest = df.drop(columns=[c for c in ("imageID", "cellType", "x", "y", image_id, cell_type, *spatial_coords)
-                            if c in df.columns])
+    needed = pd.DataFrame(
+        {
+            "imageID": df[image_id].to_numpy(),
+            "cellType": df[cell_type].to_numpy(),
+            "x": df[spatial_coords[0]].to_numpy(float),
+            "y": df[spatial_coords[1]].to_numpy(float),
+        },
+        index=df.index,
+    )
+    rest = df.drop(
+        columns=[c for c in ("imageID", "cellType", "x", "y", image_id, cell_type, *spatial_coords) if c in df.columns]
+    )
     out = pd.concat([rest, needed], axis=1)
     order = pd.Categorical(out["imageID"].astype(str), categories=list(dict.fromkeys(out["imageID"].astype(str)))).codes
     out = out.iloc[np.argsort(order, kind="stable")].reset_index(drop=True)

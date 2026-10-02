@@ -1,5 +1,7 @@
-"""``spicy()``: test for changes in the co-localisation of cell types between conditions (mirror of spicyR's
-``R/spicy_main.R``)."""
+"""``spicy()``: test for changes in the co-localisation of cell types between conditions.
+
+The mirror of spicyR's ``R/spicy_main.R``.
+"""
 
 from __future__ import annotations
 
@@ -11,12 +13,33 @@ from ._input import format_data
 from ._results import SpicyResults
 
 
-def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageID", cell_type="cellType",
-          spatial_coords=("x", "y"), r=None, from_=None, to=None, method="cell", k=None, combine="maxT",
-          adjust_abundance=True, variance="cr2", frailty=True, label_clustering=True, ref=None, cores=1,
-          survival=None, table_key="table", **kwargs) -> SpicyResults:
-    """Test, for every ordered pair of cell types ``from_ -> to``, whether their co-localisation differs between
-    conditions, or is associated with survival.
+def spicy(
+    cells,
+    condition=None,
+    subject=None,
+    covariates=None,
+    image_id="imageID",
+    cell_type="cellType",
+    spatial_coords=("x", "y"),
+    r=None,
+    from_=None,
+    to=None,
+    method="cell",
+    k=None,
+    combine="maxT",
+    adjust_abundance=True,
+    variance="cr2",
+    frailty=True,
+    label_clustering=True,
+    ref=None,
+    cores=1,
+    survival=None,
+    table_key="table",
+    **kwargs,
+) -> SpicyResults:
+    """Test whether the co-localisation of cell types differs between conditions, or is associated with survival.
+
+    Every ordered pair of cell types ``from_ -> to`` is tested.
 
     The effect is the **excess**: the number of extra ``to`` cells within ``r`` of each ``from`` cell, beyond
     random labelling of the observed cells. Images are combined within patients (``subject``) and patients within
@@ -64,7 +87,9 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
     if kwargs:
         raise TypeError(f"unexpected arguments: {list(kwargs)}")
     if method != "cell":
-        raise NotImplementedError("method='image' (the original spicyR test) is not yet available in Python; use spicyR in R.")
+        raise NotImplementedError(
+            "method='image' (the original spicyR test) is not yet available in Python; use spicyR in R."
+        )
     if combine not in ("maxT", "cauchy"):
         raise ValueError("combine must be 'maxT' or 'cauchy'.")
     if variance not in ("cr2", "hartung_knapp"):
@@ -84,8 +109,11 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
     if condition is None:
         raise ValueError("give `condition` (the column of the groups) or `survival` (time and event columns).")
     types = list(dict.fromkeys(_cell.as_str(df["cellType"])))
-    bad = [t for t in ([from_] if isinstance(from_, str) else (from_ or [])) + ([to] if isinstance(to, str) else (to or []))
-           if t not in types]
+    bad = [
+        t
+        for t in ([from_] if isinstance(from_, str) else (from_ or [])) + ([to] if isinstance(to, str) else (to or []))
+        if t not in types
+    ]
     if bad:
         raise ValueError(f"cell type not found: {bad}")
     # from -> to: extra `to` cells around each `from` cell; the core works in (counted, centre) order
@@ -102,7 +130,7 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
         miss = [c for c in covariates if c not in pheno.columns]
         if miss:
             raise ValueError(f"covariates not found: {miss}")
-        Z_extra, extra_names = _model_matrix(pheno, covariates)          # NaN rows where a covariate is missing
+        Z_extra, extra_names = _model_matrix(pheno, covariates)  # NaN rows where a covariate is missing
         Z_extra = Z_extra - np.nanmean(Z_extra, axis=0)
 
     radii = [np.nan] if k is not None else sorted(set(np.atleast_1d(r).astype(float)))
@@ -113,17 +141,25 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
     else:
         per_r = []
         for rr in radii:
-            g = _cell.cell_graph(ctx, pairs, r=None if np.isnan(rr) else rr, k=k, label_clustering=label_clustering,
-                                 n_threads=cores)
-            per_r.append([_cell.cell_pair_test(ctx, g, p[0], p[1], frailty, variance, adjust_abundance, Z_extra, extra_names)
-                          for p in pairs])
+            g = _cell.cell_graph(
+                ctx, pairs, r=None if np.isnan(rr) else rr, k=k, label_clustering=label_clustering, n_threads=cores
+            )
+            per_r.append(
+                [
+                    _cell.cell_pair_test(ctx, g, p[0], p[1], frailty, variance, adjust_abundance, Z_extra, extra_names)
+                    for p in pairs
+                ]
+            )
         res = _combine(per_r, radii, ctx, adjust_abundance or covariates is not None, combine)
     return _results(res, ctx, pheno, condition, subject, is_surv, radii, k)
 
 
 def _model_matrix(pheno, covariates):
-    """R's model.matrix(~ covariates)[, -1] with treatment contrasts (levels sorted, the first dropped), and its
-    column names (the covariate, followed by the level for a categorical one)."""
+    """R's model.matrix(~ covariates)[, -1] and its column names.
+
+    Treatment contrasts (levels sorted, the first dropped); a column is named by the covariate, followed by the
+    level for a categorical one.
+    """
     cols, names = [], []
     for c in covariates:
         v = pheno[c]
@@ -140,12 +176,15 @@ def _model_matrix(pheno, covariates):
 
 
 def _combine(per_r, radii, ctx, adjusted, combine):
-    """Several radii: per-radius tables, and one row per pair with the combined p-value (the main test and, when
-    adjusted, the unadjusted test). The other columns are those of the radius chosen by max-T."""
+    """Several radii: per-radius tables, and one row per pair with the combined p-value.
+
+    The p-value is combined for the main test and, when adjusted, for the unadjusted test. The other columns are
+    those of the radius chosen by max-T.
+    """
     tabs = [_cell.cell_table(fs, ctx, adjusted) for fs in per_r]
     if len(radii) == 1:
         return {"table": tabs[0], "fits": per_r[0]}
-    long = pd.concat([t.assign(r=rr) for t, rr in zip(tabs, radii) if t is not None])
+    long = pd.concat([t.assign(r=rr) for t, rr in zip(tabs, radii, strict=True) if t is not None])
     long = long[["r"] + [c for c in long.columns if c != "r"]]
     keys = long[["from", "to"]].drop_duplicates()
 
@@ -195,7 +234,11 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
     event = pheno[".event"].to_numpy(float)[unit_first]
     if (pd.Series(pheno[".time"].to_numpy()).groupby(ctx.image_unit).nunique() > 1).any():
         raise ValueError("the survival outcome must be constant within each subject.")
-    W = np.zeros((len(time), 0)) if covariates is None else _model_matrix(pheno.iloc[unit_first].reset_index(drop=True), covariates)[0]
+    W = (
+        np.zeros((len(time), 0))
+        if covariates is None
+        else _model_matrix(pheno.iloc[unit_first].reset_index(drop=True), covariates)[0]
+    )
     ok_u = np.isfinite(time) & np.isfinite(event) & np.all(np.isfinite(W), axis=1)
     null = _core.cox_fit(time[ok_u], event[ok_u].astype(np.int32), W[ok_u].ravel(), W.shape[1])
     if not null["ok"]:
@@ -203,7 +246,9 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
     M = np.full(len(time), np.nan)
     M[ok_u] = null["martingale"]
     rr = radii[0]
-    g = _cell.cell_graph(ctx, pairs, r=None if np.isnan(rr) else rr, k=k, label_clustering=label_clustering, n_threads=cores)
+    g = _cell.cell_graph(
+        ctx, pairs, r=None if np.isnan(rr) else rr, k=k, label_clustering=label_clustering, n_threads=cores
+    )
     fits, rows = [], []
     ev = np.where(np.isfinite(event), event, 0).astype(np.int32)
     for f, t in pairs:
@@ -216,13 +261,25 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
         parts = ([] if shared else ["abundance"]) + ([] if covariates is None else ["covariates"])
         fits.append({"from": f, "to": t, "ok": s["ok"], "reason": s["reason"], "rows": rws, "surv": s})
         if s["ok"]:
-            rows.append({"from": f, "to": t, "score_coefficient": s["score_coef"], "score_se": s["score_se"],
-                         "score_df": s["score_df"], "p_value": s["score_p"], "hazard_ratio_sd": s["hr_sd"],
-                         "log_hr_sd": s["log_hr_sd"], "log_hr_se": s["hr_se"], "hr_p_value": s["hr_p"],
-                         "log_hr_per_cell": s["log_hr_unit"], "tau2": s["tau2"],
-                         "adjusted_for": "+".join(parts) or "none",
-                         "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
-                         "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan})
+            rows.append(
+                {
+                    "from": f,
+                    "to": t,
+                    "score_coefficient": s["score_coef"],
+                    "score_se": s["score_se"],
+                    "score_df": s["score_df"],
+                    "p_value": s["score_p"],
+                    "hazard_ratio_sd": s["hr_sd"],
+                    "log_hr_sd": s["log_hr_sd"],
+                    "log_hr_se": s["hr_se"],
+                    "hr_p_value": s["hr_p"],
+                    "log_hr_per_cell": s["log_hr_unit"],
+                    "tau2": s["tau2"],
+                    "adjusted_for": "+".join(parts) or "none",
+                    "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
+                    "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan,
+                }
+            )
     tab = pd.DataFrame(rows) if rows else None
     if tab is not None:
         tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
@@ -255,8 +312,16 @@ def _results(res, ctx, pheno, condition, subject, survival, radii, k) -> SpicyRe
     pa = {"__".join(reversed(key.split("__"))): v for key, v in pa.items()}
     w = _cell.cell_image_weight(res["fits"], ctx)
     w = {"__".join(reversed(key.split("__"))): v for key, v in w.items()}
-    return SpicyResults(cell_results=tab, levels=ctx.levels, survival=survival,
-                        radius_results=_swap(res.get("radius_table")), image_ids=list(ctx.image_labels),
-                        condition=(None if survival else [ctx.levels[g] for g in ctx.image_group]),
-                        subject=(None if subject is None else _cell.as_str(pheno[subject]).tolist()),
-                        pairwise_assoc=pa, image_weights=w, r=None if k is not None else radii, k=k)
+    return SpicyResults(
+        cell_results=tab,
+        levels=ctx.levels,
+        survival=survival,
+        radius_results=_swap(res.get("radius_table")),
+        image_ids=list(ctx.image_labels),
+        condition=(None if survival else [ctx.levels[g] for g in ctx.image_group]),
+        subject=(None if subject is None else _cell.as_str(pheno[subject]).tolist()),
+        pairwise_assoc=pa,
+        image_weights=w,
+        r=None if k is not None else radii,
+        k=k,
+    )

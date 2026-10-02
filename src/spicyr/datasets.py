@@ -15,8 +15,10 @@ import numpy as np
 import pandas as pd
 
 # ExperimentHub files of the Bioconductor package SpatialDatasets: name -> (fetch id, size in bytes)
-_EH = {"spe_Ali_2020": (9652, 130297491),        # EH9586
-       "spe_Schurch_2020": (9651, 82302858)}     # EH9585
+_EH = {
+    "spe_Ali_2020": (9652, 130297491),  # EH9586
+    "spe_Schurch_2020": (9651, 82302858),
+}  # EH9585
 _NA_INT = -2147483648
 
 
@@ -49,14 +51,16 @@ def _vector(x):
 
 
 def _parse_spe(rds: str, out: str) -> None:
-    """colData and spatialCoords of a SpatialExperiment RDS file, written to `out` as a pickled DataFrame.
-    Runs in a separate process (see _spatial_experiment): rds2py changes the importing process."""
+    """Write the colData and spatialCoords of a SpatialExperiment RDS file to `out` as a pickled DataFrame.
+
+    Runs in a separate process (see _spatial_experiment): rds2py changes the importing process.
+    """
     from rds2py import parse_rds
 
     d = parse_rds(rds)
     ld = d["attributes"]["colData"]["attributes"]["listData"]
     names = ld["attributes"]["names"]["data"]
-    df = pd.DataFrame({n: _vector(c) for n, c in zip(names, ld["data"])})
+    df = pd.DataFrame({n: _vector(c) for n, c in zip(names, ld["data"], strict=True)})
     ic = d["attributes"]["int_colData"]["attributes"]["listData"]
     sc = ic["data"][ic["attributes"]["names"]["data"].index("spatialCoords")]
     nrow, ncol = sc["attributes"]["dim"]["data"]

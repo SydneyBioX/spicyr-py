@@ -10,8 +10,14 @@ import pandas as pd
 from ._cell import p_adjust_bh
 
 # matplotlib's tab10, translucent, for the plotly boxes (the same colours as the static plot)
-_TAB10_RGBA = ["rgba(31,119,180,0.3)", "rgba(255,127,14,0.3)", "rgba(44,160,44,0.3)", "rgba(214,39,40,0.3)",
-               "rgba(148,103,189,0.3)", "rgba(140,86,75,0.3)"]
+_TAB10_RGBA = [
+    "rgba(31,119,180,0.3)",
+    "rgba(255,127,14,0.3)",
+    "rgba(44,160,44,0.3)",
+    "rgba(214,39,40,0.3)",
+    "rgba(148,103,189,0.3)",
+    "rgba(140,86,75,0.3)",
+]
 
 
 @dataclass
@@ -47,13 +53,15 @@ class SpicyResults:
             key = t["from"] + "__" + t["to"]
             labels = list(dict.fromkeys(key))
             out = pd.DataFrame(index=labels)
-            out["(Intercept)"] = t["excess_ref"].groupby(key).first().reindex(labels) if col == "excess_difference" else np.nan
+            out["(Intercept)"] = (
+                t["excess_ref"].groupby(key).first().reindex(labels) if col == "excess_difference" else np.nan
+            )
             for l in self.levels[1:]:
                 k = (t["level"] == l).to_numpy()
                 out[f"condition{l}"] = pd.Series(t.loc[k, col].to_numpy(), index=key[k]).reindex(labels)
             return out
         term = "condition" if self.survival else f"condition{self.levels[1]}"
-        first = (t["excess_ref"] if col == "excess_difference" and not self.survival else np.nan)
+        first = t["excess_ref"] if col == "excess_difference" and not self.survival else np.nan
         return pd.DataFrame({"(Intercept)": first, term: t[col]}, index=t.index)
 
     @property
@@ -69,8 +77,14 @@ class SpicyResults:
         return self._wide("score_se" if self.survival else "se")
 
     # --- accessors -----------------------------------------------------------------------------------
-    def top_pairs(self, n: int | None = 10, coef: str | None = None, adj: str = "fdr", cutoff: float | None = None,
-                  figures: int | None = None) -> pd.DataFrame:
+    def top_pairs(
+        self,
+        n: int | None = 10,
+        coef: str | None = None,
+        adj: str = "fdr",
+        cutoff: float | None = None,
+        figures: int | None = None,
+    ) -> pd.DataFrame:
         """The most significant pairs, as spicyR's ``topPairs()``."""
         pv, cf = self.p_value, self.coefficient
         if coef is None:
@@ -78,8 +92,15 @@ class SpicyResults:
         p = pv[coef].to_numpy(float)
         if adj not in ("fdr", "BH"):
             raise ValueError("only adj = 'fdr' (Benjamini-Hochberg) is available.")
-        res = pd.DataFrame({"intercept": cf["(Intercept)"].to_numpy(), "coefficient": cf[coef].to_numpy(),
-                            "p.value": p, "adj.pvalue": p_adjust_bh(p)}, index=pv.index)
+        res = pd.DataFrame(
+            {
+                "intercept": cf["(Intercept)"].to_numpy(),
+                "coefficient": cf[coef].to_numpy(),
+                "p.value": p,
+                "adj.pvalue": p_adjust_bh(p),
+            },
+            index=pv.index,
+        )
         ft = res.index.to_series().str.split("__", n=1, expand=True)
         res["from"], res["to"] = ft[0].to_numpy(), ft[1].to_numpy()
         res = res.sort_values("p.value", kind="stable")
@@ -104,8 +125,9 @@ class SpicyResults:
         return out
 
     def box_plot(self, from_: str, to: str, ax=None, interactive: bool = False):
-        """Per-image excess of one pair by condition, with a point per image behind each box (spicyR's
-        ``spicyBoxPlot()``).
+        """Per-image excess of one pair by condition, with a point per image behind each box.
+
+        The Python version of spicyR's ``spicyBoxPlot()``.
 
         Each point is sized by how much the image contributes to the test (its weight in the frailty model,
         relative to the average image of its condition). With ``interactive=True`` the result is a plotly figure:
@@ -133,11 +155,17 @@ class SpicyResults:
         for i, g in enumerate(groups, start=1):
             z = d[d["condition"] == g]
             size = 25 * z["relative"].to_numpy(float) if sized else 12
-            ax.scatter(i + rng.uniform(-0.2, 0.2, len(z)), z["excess"], s=size, color="grey", alpha=0.45, lw=0,
-                       zorder=1)
-        bp = ax.boxplot([d.loc[d["condition"] == g, "excess"].to_numpy() for g in groups], widths=0.55,
-                        showfliers=False, patch_artist=True, zorder=2)
-        for patch, colour in zip(bp["boxes"], plt.cm.tab10.colors):
+            ax.scatter(
+                i + rng.uniform(-0.2, 0.2, len(z)), z["excess"], s=size, color="grey", alpha=0.45, lw=0, zorder=1
+            )
+        bp = ax.boxplot(
+            [d.loc[d["condition"] == g, "excess"].to_numpy() for g in groups],
+            widths=0.55,
+            showfliers=False,
+            patch_artist=True,
+            zorder=2,
+        )
+        for patch, colour in zip(bp["boxes"], plt.cm.tab10.colors, strict=False):
             patch.set(facecolor=(*colour, 0.3), edgecolor="black")
         for med in bp["medians"]:
             med.set_color("black")
@@ -161,24 +189,65 @@ class SpicyResults:
         rng = np.random.default_rng(1)
         for i, g in enumerate(groups):
             z = d[d["condition"] == g]
-            hover = ("image: " + z["imageID"].astype(str)
-                     + np.where(z["subject"] != z["imageID"], "<br>patient: " + z["subject"].astype(str), "")
-                     + "<br>excess: " + z["excess"].map(lambda v: f"{v:.3g}")
-                     + (("<br>relative weight: " + z["relative"].map(lambda v: f"{v:.2g}")) if sized else ""))
-            fig.add_trace(go.Scatter(x=i + rng.uniform(-0.2, 0.2, len(z)), y=z["excess"], mode="markers",
-                                     marker=dict(size=(4 + 6 * np.sqrt(z["relative"].to_numpy(float))) if sized else 6,
-                                                 color="grey", opacity=0.5, line=dict(width=0)),
-                                     text=hover, hoverinfo="text", name=g, showlegend=False))
-            fig.add_trace(go.Box(x=np.full(len(z), i), y=z["excess"], name=g, boxpoints=False, width=0.55,
-                                 fillcolor=_TAB10_RGBA[i % len(_TAB10_RGBA)],
-                                 line=dict(color="black", width=1), hoverinfo="skip", showlegend=False))
+            hover = (
+                "image: "
+                + z["imageID"].astype(str)
+                + np.where(z["subject"] != z["imageID"], "<br>patient: " + z["subject"].astype(str), "")
+                + "<br>excess: "
+                + z["excess"].map(lambda v: f"{v:.3g}")
+                + (("<br>relative weight: " + z["relative"].map(lambda v: f"{v:.2g}")) if sized else "")
+            )
+            fig.add_trace(
+                go.Scatter(
+                    x=i + rng.uniform(-0.2, 0.2, len(z)),
+                    y=z["excess"],
+                    mode="markers",
+                    marker={
+                        "size": (4 + 6 * np.sqrt(z["relative"].to_numpy(float))) if sized else 6,
+                        "color": "grey",
+                        "opacity": 0.5,
+                        "line": {"width": 0},
+                    },
+                    text=hover,
+                    hoverinfo="text",
+                    name=g,
+                    showlegend=False,
+                )
+            )
+            fig.add_trace(
+                go.Box(
+                    x=np.full(len(z), i),
+                    y=z["excess"],
+                    name=g,
+                    boxpoints=False,
+                    width=0.55,
+                    fillcolor=_TAB10_RGBA[i % len(_TAB10_RGBA)],
+                    line={"color": "black", "width": 1},
+                    hoverinfo="skip",
+                    showlegend=False,
+                )
+            )
         fig.add_hline(y=0, line_dash="dash", line_color="grey", line_width=1)
-        fig.update_layout(title=title, yaxis_title=ylabel, template="simple_white", width=520, height=480,
-                          xaxis=dict(tickmode="array", tickvals=list(range(len(groups))), ticktext=groups))
+        fig.update_layout(
+            title=title,
+            yaxis_title=ylabel,
+            template="simple_white",
+            width=520,
+            height=480,
+            xaxis={"tickmode": "array", "tickvals": list(range(len(groups))), "ticktext": groups},
+        )
         return fig
 
-    def signif_plot(self, fdr: bool = False, breaks=None, comparison_group: str | None = None,
-                    colours=("#4575B4", "white", "#D73027"), marks_to_plot=None, cutoff: float = 0.05, ax=None):
+    def signif_plot(
+        self,
+        fdr: bool = False,
+        breaks=None,
+        comparison_group: str | None = None,
+        colours=("#4575B4", "white", "#D73027"),
+        marks_to_plot=None,
+        cutoff: float = 0.05,
+        ax=None,
+    ):
         """Bubble plot of every pair, as spicyR's ``signifPlot()``.
 
         Each pair is a disc at (to, from). Its left half is coloured by the excess in the reference condition and
@@ -201,11 +270,11 @@ class SpicyResults:
             cond = [c for c in self.p_value.columns if c.startswith("condition")]
             coef = cond[0] if comparison_group is None else f"condition{comparison_group}"
             if coef not in cond:
-                raise ValueError(f"comparison_group must be one of {[c[len('condition'):] for c in cond]}")
+                raise ValueError(f"comparison_group must be one of {[c[len('condition') :] for c in cond]}")
             cf = self.coefficient
             pv = self.p_value[coef].to_numpy(float)
-            a = cf["(Intercept)"].to_numpy(float)                 # reference condition
-            b = a + cf[coef].to_numpy(float)                      # comparison condition
+            a = cf["(Intercept)"].to_numpy(float)  # reference condition
+            b = a + cf[coef].to_numpy(float)  # comparison condition
             ft = self.p_value.index.to_series().str.split("__", n=1, expand=True)
             fr_, to_ = ft[0].to_numpy(), ft[1].to_numpy()
         if fdr:
@@ -214,8 +283,10 @@ class SpicyResults:
         size = -np.log10(pv)
         marks = sorted(set(fr_) | set(to_)) if marks_to_plot is None else list(marks_to_plot)
         keep = np.isin(fr_, marks) & np.isin(to_, marks)
-        xs = sorted(set(to_[keep])); ys = sorted(set(fr_[keep]))
-        xi = {v: k for k, v in enumerate(xs)}; yi = {v: k for k, v in enumerate(ys)}
+        xs = sorted(set(to_[keep]))
+        ys = sorted(set(fr_[keep]))
+        xi = {v: k for k, v in enumerate(xs)}
+        yi = {v: k for k, v in enumerate(ys)}
 
         vals = np.concatenate([a[keep], b[keep]])
         if breaks is None:
@@ -224,7 +295,7 @@ class SpicyResults:
         else:
             lo, hi = breaks[0], breaks[1]
             ticks = np.arange(lo, hi + breaks[2] / 2, breaks[2])
-        lo, hi = min(lo, -1e-9), max(hi, 1e-9)                   # the scale is centred on 0
+        lo, hi = min(lo, -1e-9), max(hi, 1e-9)  # the scale is centred on 0
         cmap = LinearSegmentedColormap.from_list("spicy", list(colours))
         norm = TwoSlopeNorm(vcenter=0.0, vmin=lo, vmax=hi)
         smax = np.nanmax(size[keep]) if keep.any() else 1.0
@@ -237,15 +308,19 @@ class SpicyResults:
                 continue
             x, y = xi[to_[k]], yi[fr_[k]]
             rad = max(size[k] / smax / 2, 0.15)
-            ca = cmap(norm(np.clip(a[k], lo, hi))); cb = cmap(norm(np.clip(b[k], lo, hi)))
-            ax.add_patch(Wedge((x, y), rad, 90, 270, facecolor=ca, edgecolor="none"))     # left: reference
-            ax.add_patch(Wedge((x, y), rad, -90, 90, facecolor=cb, edgecolor="none"))     # right: comparison
+            ca = cmap(norm(np.clip(a[k], lo, hi)))
+            cb = cmap(norm(np.clip(b[k], lo, hi)))
+            ax.add_patch(Wedge((x, y), rad, 90, 270, facecolor=ca, edgecolor="none"))  # left: reference
+            ax.add_patch(Wedge((x, y), rad, -90, 90, facecolor=cb, edgecolor="none"))  # right: comparison
             if sig[k]:
                 ax.add_patch(Circle((x, y), rad, fill=False, edgecolor="black", linewidth=1))
-        ax.set_xlim(-0.6, len(xs) - 0.4); ax.set_ylim(-0.6, len(ys) - 0.4)
+        ax.set_xlim(-0.6, len(xs) - 0.4)
+        ax.set_ylim(-0.6, len(ys) - 0.4)
         ax.set_aspect("equal")
-        ax.set_xticks(range(len(xs)), xs, rotation=45, ha="right"); ax.set_yticks(range(len(ys)), ys)
-        ax.set_xlabel("to (counted)"); ax.set_ylabel("from (centre)")
+        ax.set_xticks(range(len(xs)), xs, rotation=45, ha="right")
+        ax.set_yticks(range(len(ys)), ys)
+        ax.set_xlabel("to (counted)")
+        ax.set_ylabel("from (centre)")
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
 
@@ -257,14 +332,43 @@ class SpicyResults:
         cbar.set_label("log HR per SD" if self.survival else "Localisation (excess)")
 
         # legends: significance ring, -log10 p sizes, and (two conditions) which half is which
-        handles = [Line2D([], [], marker="o", ls="", markerfacecolor="none", markeredgecolor="black", markersize=10,
-                          label=("BH-adjusted p" if fdr else "p-value") + f" < {cutoff}")]
+        handles = [
+            Line2D(
+                [],
+                [],
+                marker="o",
+                ls="",
+                markerfacecolor="none",
+                markeredgecolor="black",
+                markersize=10,
+                label=("BH-adjusted p" if fdr else "p-value") + f" < {cutoff}",
+            )
+        ]
         for q in np.unique(np.round(np.linspace(smax / 4, smax, 3), 1)):
-            handles.append(Line2D([], [], marker="o", ls="", color="grey", alpha=0.6,
-                                  markersize=2 * 18 * max(q / smax / 2, 0.15), label=f"{q:g}"))
+            handles.append(
+                Line2D(
+                    [],
+                    [],
+                    marker="o",
+                    ls="",
+                    color="grey",
+                    alpha=0.6,
+                    markersize=2 * 18 * max(q / smax / 2, 0.15),
+                    label=f"{q:g}",
+                )
+            )
         fig = ax.figure
-        leg = fig.legend(handles=handles[1:], title="-log10 adjusted p" if fdr else "-log10 p", loc="upper left", bbox_to_anchor=(1.0, 0.95),
-                         frameon=False, fontsize=8, title_fontsize=9, labelspacing=1.2, borderpad=0.2)
+        fig.legend(
+            handles=handles[1:],
+            title="-log10 adjusted p" if fdr else "-log10 p",
+            loc="upper left",
+            bbox_to_anchor=(1.0, 0.95),
+            frameon=False,
+            fontsize=8,
+            title_fontsize=9,
+            labelspacing=1.2,
+            borderpad=0.2,
+        )
         fig.legend(handles=handles[:1], loc="upper left", bbox_to_anchor=(1.0, 0.55), frameon=False, fontsize=8)
         if not self.survival:
             # which half is which condition: half-disc symbols, as spicyR's legend
@@ -280,18 +384,34 @@ class SpicyResults:
                     th = (90, 270) if self.left else (-90, 90)
                     return [Wedge((x0 + width / 2, y0 + height / 2), r, *th, facecolor="grey", transform=trans)]
 
-            ref, comp = self.levels[0], coef[len("condition"):]
+            ref, comp = self.levels[0], coef[len("condition") :]
             hl, hr = Line2D([], []), Line2D([], [])
-            fig.legend(handles=[hl, hr], labels=[ref, comp], handler_map={hl: _Half(True), hr: _Half(False)},
-                       title="Condition", loc="upper left", bbox_to_anchor=(1.0, 0.42), frameon=False,
-                       fontsize=8, title_fontsize=9, handleheight=1.6, handlelength=1.6)
+            fig.legend(
+                handles=[hl, hr],
+                labels=[ref, comp],
+                handler_map={hl: _Half(True), hr: _Half(False)},
+                title="Condition",
+                loc="upper left",
+                bbox_to_anchor=(1.0, 0.42),
+                frameon=False,
+                fontsize=8,
+                title_fontsize=9,
+                handleheight=1.6,
+                handlelength=1.6,
+            )
         return ax
 
     def __repr__(self):
         t = self.cell_results
         n = len(t[["from", "to"]].drop_duplicates())
-        what = "association with survival" if self.survival else "; ".join(f"{l} vs {self.levels[0]}" for l in self.levels[1:])
-        scale = f"k = {self.k} nearest neighbours" if self.k is not None else "r = " + ", ".join(f"{v:g}" for v in self.r)
+        what = (
+            "association with survival"
+            if self.survival
+            else "; ".join(f"{l} vs {self.levels[0]}" for l in self.levels[1:])
+        )
+        scale = (
+            f"k = {self.k} nearest neighbours" if self.k is not None else "r = " + ", ".join(f"{v:g}" for v in self.r)
+        )
         lines = [f"spicyr (cell-level test): {n} pairs, {what}, {scale}"]
         if self.subject is None:
             lines.append(f"Units: {len(self.image_ids)} images (no subject given: each image is a patient)")

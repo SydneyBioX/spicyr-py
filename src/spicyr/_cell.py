@@ -8,7 +8,7 @@ two give the same numbers.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -127,8 +127,20 @@ def cell_context(cells: pd.DataFrame, condition, subject, ref=None, survival=Fal
     np.add.at(counts, (image_codes, type_codes), 1.0)
     offsets = np.concatenate([[0], np.cumsum(np.bincount(image_codes, minlength=n_images))]).astype(np.int32)
     data = _core.Dataset(df["x"].to_numpy(float), df["y"].to_numpy(float), type_codes, offsets, len(type_labels))
-    return Context(df, image_labels, image_codes, n_images, unit_labels, image_unit, first, type_labels, counts,
-                   data, levels, image_group)
+    return Context(
+        df,
+        image_labels,
+        image_codes,
+        n_images,
+        unit_labels,
+        image_unit,
+        first,
+        type_labels,
+        counts,
+        data,
+        levels,
+        image_group,
+    )
 
 
 @dataclass
@@ -163,8 +175,16 @@ def cell_graph(ctx: Context, pairs, r=None, k=None, label_clustering=True, windo
 
 
 def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
-    rows = _core.excess_image_rows(g.totals, g.sq, ctx.counts, len(ctx.type_labels), ctx.type_labels.index(f),
-                                   ctx.type_labels.index(t), g.knn, g.psi)
+    rows = _core.excess_image_rows(
+        g.totals,
+        g.sq,
+        ctx.counts,
+        len(ctx.type_labels),
+        ctx.type_labels.index(f),
+        ctx.type_labels.index(t),
+        g.knn,
+        g.psi,
+    )
     rows["unit"] = ctx.image_unit[rows["img"]].astype(np.int32)
     if ctx.image_group is not None:
         rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)
@@ -182,9 +202,11 @@ def _share(ctx, rows, f):
 
 
 def _design(ctx, rows, f, adjust, Z_extra, extra_names):
-    """The design of the main test: one indicator per condition, then the centred log share of the counted type
-    (adjust) and the centred covariates. Images with a missing covariate are left out. None when there is
-    nothing to adjust for."""
+    """The design of the main test.
+
+    One indicator per condition, then the centred log share of the counted type (adjust) and the centred
+    covariates. Images with a missing covariate are left out. None when there is nothing to adjust for.
+    """
     cols, names = [], []
     if adjust:
         s = _share(ctx, rows, f)
@@ -209,8 +231,11 @@ def _design(ctx, rows, f, adjust, Z_extra, extra_names):
 
 
 def _design_tau2(d, G, frailty, tau2):
-    """tau2 of the adjusted design: re-estimated when every added column is constant within patients, else held at
-    the unadjusted value (new_methods.pdf, Remark 3)."""
+    """tau2 of the adjusted design.
+
+    Re-estimated when every added column is constant within patients, else held at the unadjusted value
+    (new_methods.pdf, Remark 3).
+    """
     if not frailty:
         return 0.0
     X = d["Z"][:, G:]
@@ -239,30 +264,54 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_
         return cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names)
     m = len(ctx.unit_labels)
     r = _core.excess_test(rows, rows["unit"], rows["group"], m, frailty, variance)
-    out = {"from": f, "to": t, "ok": r["ok"], "reason": r["reason"], "rows": rows, "test": r, "unadjusted": r,
-           "adjusted_for": "none"}
+    out = {
+        "from": f,
+        "to": t,
+        "ok": r["ok"],
+        "reason": r["reason"],
+        "rows": rows,
+        "test": r,
+        "unadjusted": r,
+        "adjusted_for": "none",
+    }
     if not r["ok"]:
         return out
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
-    a = _design_tests(d["rows"], m, d["Z"], _contrasts(2, d["Z"].shape[1]), _design_tau2(d, 2, frailty, r["tau2"]),
-                      variance == "hartung_knapp")
+    a = _design_tests(
+        d["rows"],
+        m,
+        d["Z"],
+        _contrasts(2, d["Z"].shape[1]),
+        _design_tau2(d, 2, frailty, r["tau2"]),
+        variance == "hartung_knapp",
+    )
     # a design that is not of full rank (e.g. a covariate confounded with the condition): the unadjusted test
     if not a[0]["ok"]:
         out["adjusted_for"] = f"none ({a[0]['reason']})"
         return out
     x = a[0]
-    out["test"] = {"coef_ref": x["theta"][0], "coef_comp": x["theta"][1], "difference": x["estimate"], "se": x["se"],
-                   "df": x["df"], "p": x["p"], "tau2": x["tau2"], "influence": x["influence"]}
-    out["effects"] = dict(zip(d["extra"], a[1:]))
+    out["test"] = {
+        "coef_ref": x["theta"][0],
+        "coef_comp": x["theta"][1],
+        "difference": x["estimate"],
+        "se": x["se"],
+        "df": x["df"],
+        "p": x["p"],
+        "tau2": x["tau2"],
+        "influence": x["influence"],
+    }
+    out["effects"] = dict(zip(d["extra"], a[1:], strict=True))
     out["adjusted_for"] = d["adjusted_for"]
     return out
 
 
 def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names) -> dict:
-    """More than two conditions: one design with an indicator per level, each level tested against the reference
-    (the first level), with the same adjustments as for two conditions."""
+    """More than two conditions: each level tested against the reference (the first level).
+
+    One design with an indicator per level, with the same adjustments as for two conditions.
+    """
     G = len(ctx.levels)
     m = len(ctx.unit_labels)
     hk = variance == "hartung_knapp"
@@ -276,17 +325,19 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
     if not u[0]["ok"]:
         out["reason"] = "design_not_full_rank"
         return out
-    un = dict(zip(ctx.levels[1:], u))
+    un = dict(zip(ctx.levels[1:], u, strict=True))
     out.update(ok=True, levels_test=un, unadjusted_levels=un, test={"coef_ref": u[0]["theta"][0], "tau2": u[0]["tau2"]})
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
-    a = _design_tests(d["rows"], m, d["Z"], _contrasts(G, d["Z"].shape[1]), _design_tau2(d, G, frailty, u[0]["tau2"]), hk)
+    a = _design_tests(
+        d["rows"], m, d["Z"], _contrasts(G, d["Z"].shape[1]), _design_tau2(d, G, frailty, u[0]["tau2"]), hk
+    )
     if not a[0]["ok"]:
         out["adjusted_for"] = f"none ({a[0]['reason']})"
         return out
-    out["levels_test"] = dict(zip(ctx.levels[1:], a[:G - 1]))
-    out["effects"] = dict(zip(d["extra"], a[G - 1:]))
+    out["levels_test"] = dict(zip(ctx.levels[1:], a[: G - 1], strict=True))
+    out["effects"] = dict(zip(d["extra"], a[G - 1 :], strict=True))
     out["test"] = {"coef_ref": a[0]["theta"][0], "tau2": a[0]["tau2"]}
     out["adjusted_for"] = d["adjusted_for"]
     return out
@@ -305,8 +356,22 @@ def _add_effects(row, o, enames):
     return row
 
 
-FIRST_COLUMNS = ["from", "to", "level", "r", "excess_ref", "excess_comp", "excess_difference", "se", "df", "p_value",
-                 "p_adj", "p_value_best_radius", "tau2", "adjusted_for"]
+FIRST_COLUMNS = [
+    "from",
+    "to",
+    "level",
+    "r",
+    "excess_ref",
+    "excess_comp",
+    "excess_difference",
+    "se",
+    "df",
+    "p_value",
+    "p_adj",
+    "p_value_best_radius",
+    "tau2",
+    "adjusted_for",
+]
 
 
 def order_columns(tab):
@@ -324,14 +389,27 @@ def cell_table(fits, ctx, adjusted) -> pd.DataFrame | None:
     rows = []
     for o in ok:
         x = o["test"]
-        row = {"from": o["from"], "to": o["to"], "excess_ref": x["coef_ref"], "excess_comp": x["coef_comp"],
-               "excess_difference": x["difference"], "se": x["se"], "df": x["df"], "p_value": x["p"], "tau2": x["tau2"]}
+        row = {
+            "from": o["from"],
+            "to": o["to"],
+            "excess_ref": x["coef_ref"],
+            "excess_comp": x["coef_comp"],
+            "excess_difference": x["difference"],
+            "se": x["se"],
+            "df": x["df"],
+            "p_value": x["p"],
+            "tau2": x["tau2"],
+        }
         if adjusted:
             row["adjusted_for"] = o["adjusted_for"]
             _add_effects(row, o, enames)
             u = o["unadjusted"]
-            row.update(unadjusted_difference=u["difference"], unadjusted_se=u["se"], unadjusted_df=u["df"],
-                       unadjusted_p_value=u["p"])
+            row.update(
+                unadjusted_difference=u["difference"],
+                unadjusted_se=u["se"],
+                unadjusted_df=u["df"],
+                unadjusted_p_value=u["p"],
+            )
         rows.append(row)
     if not rows:
         return None
@@ -350,14 +428,27 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
     rows = []
     for o in ok:
         for l, d in o["levels_test"].items():
-            row = {"from": o["from"], "to": o["to"], "level": l, "excess_ref": d["theta"][0],
-                   "excess_difference": d["estimate"], "se": d["se"], "df": d["df"], "p_value": d["p"], "tau2": d["tau2"]}
+            row = {
+                "from": o["from"],
+                "to": o["to"],
+                "level": l,
+                "excess_ref": d["theta"][0],
+                "excess_difference": d["estimate"],
+                "se": d["se"],
+                "df": d["df"],
+                "p_value": d["p"],
+                "tau2": d["tau2"],
+            }
             if adjusted:
                 row["adjusted_for"] = o["adjusted_for"]
                 _add_effects(row, o, enames)
                 u = o["unadjusted_levels"][l]
-                row.update(unadjusted_difference=u["estimate"], unadjusted_se=u["se"], unadjusted_df=u["df"],
-                           unadjusted_p_value=u["p"])
+                row.update(
+                    unadjusted_difference=u["estimate"],
+                    unadjusted_se=u["se"],
+                    unadjusted_df=u["df"],
+                    unadjusted_p_value=u["p"],
+                )
             rows.append(row)
     if not rows:
         return None
@@ -386,8 +477,11 @@ def cell_image_excess(fits, ctx) -> dict:
 
 
 def cell_image_weight(fits, ctx) -> dict:
-    """Per-image weight of every pair: the image's share of its condition's information in the frailty model (sums
-    to 1 within each condition); NaN where the pair was not tested."""
+    """Per-image weight of every pair.
+
+    The image's share of its condition's information in the frailty model (sums to 1 within each condition);
+    NaN where the pair was not tested.
+    """
     out = {}
     for o in fits:
         v = np.full(ctx.n_images, np.nan)

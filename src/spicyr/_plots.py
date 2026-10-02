@@ -11,16 +11,28 @@ def _density(ax, x, y, bins=100):
     """The density of all cells: a 2-D histogram smoothed with a Gaussian kernel (bandwidth by Scott's rule)."""
     xr, yr = (x.min(), x.max()), (y.min(), y.max())
     h, xe, ye = np.histogram2d(x, y, bins=bins, range=[xr, yr])
-    sd = len(x) ** (-1 / 6)                                             # Scott's rule, per axis, in units of sd
+    sd = len(x) ** (-1 / 6)  # Scott's rule, per axis, in units of sd
     for axis, (lo, hi), v in ((0, xr, x), (1, yr, y)):
         s = max(sd * v.std() / ((hi - lo) / bins), 0.5)
         k = np.exp(-0.5 * (np.arange(-int(4 * s), int(4 * s) + 1) / s) ** 2)
-        h = np.apply_along_axis(lambda row: np.convolve(row, k / k.sum(), mode="same"), axis, h)
+        k = k / k.sum()
+        h = np.apply_along_axis(np.convolve, axis, h, k, mode="same")
     ax.imshow(h.T, origin="lower", extent=(xe[0], xe[-1], ye[0], ye[-1]), cmap="Blues", aspect="equal", zorder=0)
 
 
-def plot_image(cells, image, from_, to, r=None, image_id="imageID", cell_type="cellType", spatial_coords=("x", "y"),
-               table_key="table", ax=None, **kwargs):
+def plot_image(
+    cells,
+    image,
+    from_,
+    to,
+    r=None,
+    image_id="imageID",
+    cell_type="cellType",
+    spatial_coords=("x", "y"),
+    table_key="table",
+    ax=None,
+    **kwargs,
+):
     """Plot one image, showing the ``from_`` and ``to`` cells of a pair.
 
     The density of all cells is shown in blue, with the ``from_`` cells (gold) and ``to`` cells (dark red) on top.
@@ -63,8 +75,14 @@ def plot_image(cells, image, from_, to, r=None, image_id="imageID", cell_type="c
     ct = z["cellType"].astype(str)
     f, t = z[ct == from_], z[ct == to]
     if r is not None and len(f):
-        circles = PatchCollection([Circle((a, b), r) for a, b in zip(f["x"], f["y"])], facecolor="none",
-                                  edgecolor="#d6b11c", linewidth=0.5, alpha=0.7, zorder=1)
+        circles = PatchCollection(
+            [Circle((a, b), r) for a, b in zip(f["x"], f["y"], strict=True)],
+            facecolor="none",
+            edgecolor="#d6b11c",
+            linewidth=0.5,
+            alpha=0.7,
+            zorder=1,
+        )
         ax.add_collection(circles)
     ax.scatter(f["x"], f["y"], s=6, color="#d6b11c", label=f"{from_} ({len(f)})", zorder=2)
     ax.scatter(t["x"], t["y"], s=6, color="#850f07", label=f"{to} ({len(t)})", zorder=3)

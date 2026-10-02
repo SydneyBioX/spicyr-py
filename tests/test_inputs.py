@@ -9,7 +9,7 @@ import pytest
 import spicyr
 
 CELLS = pd.read_csv(Path(__file__).parent / "shared_cases" / "cells.csv")
-ARGS = dict(condition="condition", subject="patient", r=30, from_="tumour", to=["T", "B"])
+ARGS = {"condition": "condition", "subject": "patient", "r": 30, "from_": "tumour", "to": ["T", "B"]}
 
 
 def ref():
@@ -38,8 +38,11 @@ def test_spatialdata_table_and_centroids():
     obs.index = [f"c{i}" for i in range(len(obs))]
     shapes = {}
     for img, z in CELLS.assign(instance_id=obs["instance_id"].to_numpy()).groupby("imageID"):
-        g = gpd.GeoDataFrame({"radius": np.full(len(z), 2.0)}, geometry=[Point(x, y) for x, y in zip(z["x"], z["y"])],
-                             index=z["instance_id"].to_numpy())
+        g = gpd.GeoDataFrame(
+            {"radius": np.full(len(z), 2.0)},
+            geometry=[Point(x, y) for x, y in zip(z["x"], z["y"], strict=True)],
+            index=z["instance_id"].to_numpy(),
+        )
         shapes[img] = ShapesModel.parse(g)
     table = TableModel.parse(ad.AnnData(obs=obs), region=list(shapes), region_key="region", instance_key="instance_id")
     sdata = sd.SpatialData(shapes=shapes, tables={"table": table})
@@ -60,7 +63,7 @@ def test_accessors():
     assert len(tp) == 5 and {"from", "to", "coefficient", "p.value"} <= set(tp.columns)
     assert res.bind().shape == (CELLS["imageID"].nunique(), 3 + len(res.cell_results))
     assert "tumour__T" in res.cell_results.index
-    assert res.cell_results.loc["tumour__T", "excess_difference"] > 0   # T cells were moved next to tumour cells
+    assert res.cell_results.loc["tumour__T", "excess_difference"] > 0  # T cells were moved next to tumour cells
     pytest.importorskip("matplotlib")
     res.box_plot("tumour", "T")
     res.signif_plot()
@@ -68,7 +71,7 @@ def test_accessors():
     w = res.image_weights["tumour__T"]
     sums = pd.Series(w).groupby(np.array(res.condition)).sum()
     np.testing.assert_allclose(sums.to_numpy(), 1.0, rtol=1e-10)
-    plotly = pytest.importorskip("plotly")
+    pytest.importorskip("plotly")
     fig = res.box_plot("tumour", "T", interactive=True)
     assert any(tr.type == "scatter" and "image:" in tr.text[0] for tr in fig.data)
 
@@ -78,5 +81,7 @@ def test_numeric_levels_are_named_as_in_r():
     cells = CELLS.copy()
     pat = sorted(cells["patient"].unique())
     cells["grade"] = pd.Categorical(cells["patient"].map({p: float(1 + i % 3) for i, p in enumerate(pat)}))
-    res = spicyr.spicy(cells, condition="condition", subject="patient", r=30, from_="tumour", to="T", covariates="grade")
+    res = spicyr.spicy(
+        cells, condition="condition", subject="patient", r=30, from_="tumour", to="T", covariates="grade"
+    )
     assert {"grade2_effect", "grade3_p_value"} <= set(res.cell_results.columns)
