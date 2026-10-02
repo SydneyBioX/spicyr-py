@@ -12,9 +12,10 @@ pair of cell types in imaging and spatial transcriptomics data, comparing groups
 co-localisation to survival. For each image it counts the cells of one type within a radius of each cell of another,
 and compares that count with what you would expect if the cells had been labelled at random, using the cells
 actually present. Holes, air spaces and uneven cell density therefore do not by themselves create a signal.
-Patients, not images or cells, are the units of the test.
+Patients, not images or cells, are the units of the test. It needs the type and position of every cell (for
+example imaging mass cytometry, CODEX, MIBI, Xenium or CosMx), not spot-based data.
 
-spicyr is the Python version of the Bioconductor package [spicyR](https://bioconductor.org/packages/spicyR) and
+spicyr is the Python version of the R package [spicyR 2.0](https://github.com/SydneyBioX/spicyR/tree/spicyR2) and
 works with SpatialData, AnnData and pandas objects.
 
 ![Left, a tumour cell with a 25 µm circle and the T cells inside it. Right, box plots of the extra T cells per tumour cell, one point per patient, higher in ER-positive than ER-negative tumours.](docs/_static/spicyR_overview.png)
@@ -26,11 +27,11 @@ import spicyr
 
 cells = spicyr.datasets.metabric_ali2020()                      # breast cancer imaging mass cytometry
 cells = cells[cells["ER.Status"].isin(["neg", "pos"])]
-res = spicyr.spicy(cells, condition="ER.Status", subject="metabricId", r=25,
+res = spicyr.spicy(cells, condition="ER.Status", subject="metabricId", r=25,   # reference group: "neg"
                    image_id="file_id", cell_type="description")
 res.top_pairs()                         # the most significant pairs
 res.signif_plot()                       # every pair at a glance
-res.box_plot("HR- Ki67+", "T cells")    # T cells around proliferating tumour cells, per patient
+res.box_plot("HR- Ki67+", "T cells")    # T cells around proliferating tumour cells, per image
 ```
 
 For your own data, `spicy()` looks for the columns `imageID` and `cellType` (name yours with `image_id=` and

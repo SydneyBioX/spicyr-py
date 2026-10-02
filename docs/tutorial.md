@@ -23,14 +23,18 @@ Do T cells gather around tumour cells more in one group of patients than in anot
 pair of cell types at once.
 
 A pair is written *from* → *to*. For each *from* cell, spicyr counts the *to* cells within a radius, and compares
-that count with what we would expect if the *from* cells had been placed at random among the other cells of the
-same image. The difference is the **excess**: the number of extra *to* cells around each *from* cell, beyond
+that count with what we would expect if the *from* cells were a random choice among the cells of the same image
+that are not *to* cells. The difference is the **excess**: the number of extra *to* cells around each *from* cell, beyond
 chance. Because the comparison uses only the cells that are actually there, empty regions such as holes or air
-spaces, and uneven cell density, do not by themselves create a signal. spicyr then compares the excess between
+spaces, and uneven cell density, do not by themselves create a signal (artefacts that affect one cell type more
+than others are not removed). spicyr then compares the excess between
 groups of patients, treating patients, not images or cells, as the units of the test.
 
 Pairs are directional: T cells → tumour cells asks how many extra tumour cells sit around each T cell, which is a
 different question from tumour cells → T cells.
+
+spicyr needs the type and position of every cell, as from imaging mass cytometry, CODEX, MIBI, Xenium, CosMx or
+MERSCOPE; it is not designed for spot-based data such as Visium.
 
 ```{figure} _static/spicyR_overview.png
 :width: 100%
@@ -42,8 +46,11 @@ with chance. Each patient gets an excess, and the excess is compared between ER-
 
 ## Installation
 
+spicyr will be released on PyPI together with spicyR 2.0; until then, install it from GitHub (this needs a C++17
+compiler).
+
 ```bash
-pip install "spicyr[data,plot,anndata]"
+pip install "spicyr[data,plot,anndata] @ git+https://github.com/SydneyBioX/spicyr-py"
 ```
 
 ```{code-cell} ipython3
@@ -111,7 +118,8 @@ res = spicyr.spicy(adata, condition="ER", subject="metabricId", r=25,
 res
 ```
 
-All 484 ordered pairs of cell types are tested, in about ten seconds on one core. `top_pairs()` lists the most
+All 484 ordered pairs of cell types are tested, in about ten seconds on one core; run time and memory grow
+roughly in proportion to the number of cells and to the radius. `top_pairs()` lists the most
 significant. `intercept` is the average excess in ER− patients, and `coefficient` is the difference in average
 excess between ER+ and ER− patients (ER+ minus ER−), in extra *to* cells per *from* cell. P-values are adjusted
 across all pairs by the Benjamini–Hochberg method.
@@ -158,8 +166,10 @@ In ER− tumours these tumour cells have no more T cells nearby than chance woul
 image (here one image per patient).
 
 ```{code-cell} ipython3
+above = int((res.bind("HR- Ki67+__T cells")["HR- Ki67+__T cells"] > 4).sum())
 ax = res.box_plot("HR- Ki67+", "T cells")
-ax.set_ylim(-2, 4);
+ax.set_ylim(-2, 4)
+ax.set_title(f"T cells around HR- Ki67+ ({above} images above 4 not shown)", fontsize=10);
 ```
 
 This is an association in one cohort; it does not show that the tumour cells attract T cells. `HR- Ki67+` cells are
@@ -187,7 +197,8 @@ tab.loc[["HR- Ki67+__T cells"], cols[2:]]
 Most pairs with `HR+ CK7-` as the *to* type are no longer significant after the adjustment, so their unadjusted
 signal may largely reflect abundance. Because abundance differs so much with ER status, the adjusted test also has
 less power for these pairs, so a non-significant adjusted result is not evidence of no effect. Our pair stays
-significant.
+significant, and more strongly so: when the *to* type's abundance varies a lot between patients, adjusting for it
+can remove noise as well as bias.
 
 ```{code-cell} ipython3
 fig, ax = plt.subplots(figsize=(5.5, 5.5))
@@ -256,7 +267,7 @@ rr = res_r.radius_results
 for to, g in rr[(rr["from"] == "HR- Ki67+") & rr["to"].isin(["T cells", "B cells"])].groupby("to"):
     ax.plot(g["r"], -np.log10(g["p_value"]), marker="o", label=to)
 ax.set_ylim(bottom=0)
-ax.set_xlabel("radius (µm)"); ax.set_ylabel("-log10 p, ER+ vs ER-")
+ax.set_xlabel("radius (µm)"); ax.set_ylabel("-log10 p at each radius, ER+ vs ER-")
 ax.legend(title="around HR- Ki67+", frameon=False);
 ```
 
@@ -324,7 +335,8 @@ $$\delta = \frac{O - \mathrm{E}_{\mathrm{RL}}(O)}{n},$$
 where $\mathrm{E}_{\mathrm{RL}}(O)$ is that expectation under random labelling and $n$ is the number of *from*
 cells.
 
-Images from the same patient are combined, giving more weight to images with more *from* cells. Each patient has its
+Images from the same patient are combined, giving more weight to more informative images (usually those with more
+*from* cells). Each patient has its
 own true excess, which varies around its group's mean by an amount estimated from the data (a frailty, or
 random-effects, model). The difference between groups is tested with a small-sample cluster-robust (CR2) variance on
 Satterthwaite degrees of freedom, with patients as the clusters. This is designed to keep false positives near the

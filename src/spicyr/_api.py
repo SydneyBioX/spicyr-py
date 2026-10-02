@@ -24,8 +24,8 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
     freedom, with **patients as the units**. The results also give the difference at equal availability of the
     ``to`` type (``adjusted_*`` columns).
 
-    This is the Python twin of ``spicyR::spicy()``: the same C++ core, the same arguments (``from`` is spelled
-    ``from_`` because ``from`` is a Python keyword; ``**{"from": ...}`` also works) and the same results.
+    This is the Python version of ``spicyR::spicy()``, on the same C++ code and with the same results. ``from`` is
+    spelled ``from_`` because ``from`` is a Python keyword (``**{"from": ...}`` also works).
 
     Parameters
     ----------
