@@ -11,5 +11,6 @@ nb_execution_mode = "force"     # the tutorial runs at every build, like an R vi
 nb_execution_timeout = 600
 nb_execution_raise_on_error = True
 myst_enable_extensions = ["dollarmath", "colon_fence"]
+myst_heading_anchors = 2
 napoleon_numpy_docstring = True
 suppress_warnings = ["mystnb.unknown_mime_type"]

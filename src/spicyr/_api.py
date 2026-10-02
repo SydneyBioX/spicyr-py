@@ -83,7 +83,7 @@ def spicy(cells, condition=None, subject=None, covariates=None, image_id="imageI
         condition, survival = survival[0], survival[1]
     if condition is None:
         raise ValueError("give `condition` (the column of the groups) or `survival` (time and event columns).")
-    types = list(dict.fromkeys(df["cellType"].astype(str)))
+    types = list(dict.fromkeys(_cell.as_str(df["cellType"])))
     bad = [t for t in ([from_] if isinstance(from_, str) else (from_ or [])) + ([to] if isinstance(to, str) else (to or []))
            if t not in types]
     if bad:
@@ -132,7 +132,7 @@ def _model_matrix(pheno, covariates):
             names.append(c)
         else:
             lev = _cell.condition_levels(v)
-            d = np.column_stack([(v.astype(str) == l).to_numpy(float) for l in lev[1:]])
+            d = np.column_stack([(_cell.as_str(v) == l).to_numpy(float) for l in lev[1:]])
             d[v.isna().to_numpy()] = np.nan
             cols.append(d)
             names += [f"{c}{l}" for l in lev[1:]]
@@ -258,5 +258,5 @@ def _results(res, ctx, pheno, condition, subject, survival, radii, k) -> SpicyRe
     return SpicyResults(cell_results=tab, levels=ctx.levels, survival=survival,
                         radius_results=_swap(res.get("radius_table")), image_ids=list(ctx.image_labels),
                         condition=(None if survival else [ctx.levels[g] for g in ctx.image_group]),
-                        subject=(None if subject is None else pheno[subject].astype(str).tolist()),
+                        subject=(None if subject is None else _cell.as_str(pheno[subject]).tolist()),
                         pairwise_assoc=pa, image_weights=w, r=None if k is not None else radii, k=k)

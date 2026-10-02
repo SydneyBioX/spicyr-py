@@ -34,12 +34,27 @@ def p_adjust_bh(p) -> np.ndarray:
     return out
 
 
+def _r_str_value(v) -> str:
+    if isinstance(v, (float, np.floating)):
+        return "NaN" if np.isnan(v) else f"{v:.15g}"
+    return str(v)
+
+
+def as_str(col: pd.Series) -> pd.Series:
+    """A column as strings, the way R's as.character() writes it (2.0 is "2"), so that labels match spicyR's."""
+    if isinstance(col.dtype, pd.CategoricalDtype):
+        return col.cat.rename_categories([_r_str_value(c) for c in col.cat.categories]).astype(str).where(col.notna())
+    if pd.api.types.is_float_dtype(col):
+        return col.map(_r_str_value).where(col.notna())
+    return col.astype(str).where(col.notna())
+
+
 def condition_levels(col: pd.Series) -> list[str]:
     """Levels present in a condition column: categories in order if categorical, else sorted (C locale)."""
     if isinstance(col.dtype, pd.CategoricalDtype):
-        present = set(col.dropna().astype(str))
-        return [str(c) for c in col.cat.categories if str(c) in present]
-    return sorted(set(col.dropna().astype(str)))
+        present = set(as_str(col).dropna())
+        return [c for c in (_r_str_value(c) for c in col.cat.categories) if c in present]
+    return sorted(set(as_str(col).dropna()))
 
 
 def enumerate_pairs(from_, to, all_types):
@@ -68,7 +83,7 @@ class Context:
 
 
 def cell_context(cells: pd.DataFrame, condition, subject, ref=None, survival=False) -> Context:
-    image_chr = cells["imageID"].astype(str).to_numpy()
+    image_chr = as_str(cells["imageID"]).to_numpy()
     image_labels = sorted(set(image_chr))
     lab_index = {s: i for i, s in enumerate(image_labels)}
     image_codes = np.array([lab_index[s] for s in image_chr], dtype=int)
@@ -78,11 +93,11 @@ def cell_context(cells: pd.DataFrame, condition, subject, ref=None, survival=Fal
     n_images = len(image_labels)
     first = np.searchsorted(image_codes, np.arange(n_images))
 
-    if subject is None or cells[subject].astype(str).nunique() == n_images:
+    if subject is None or as_str(cells[subject]).nunique() == n_images:
         unit_labels = list(image_labels)
         image_unit = np.arange(n_images)
     else:
-        sub = df[subject].astype(str).to_numpy()[first]
+        sub = as_str(df[subject]).to_numpy()[first]
         unit_labels = list(dict.fromkeys(sub))
         ui = {s: i for i, s in enumerate(unit_labels)}
         image_unit = np.array([ui[s] for s in sub], dtype=int)
@@ -96,7 +111,7 @@ def cell_context(cells: pd.DataFrame, condition, subject, ref=None, survival=Fal
             if str(ref) not in levels:
                 raise ValueError("`ref` is not a level of `condition`.")
             levels = [str(ref)] + [l for l in levels if l != str(ref)]
-        cond = df[condition].astype(str).to_numpy()
+        cond = as_str(df[condition]).to_numpy()
         per_image = pd.Series(cond).groupby(image_codes).nunique()
         if (per_image > 1).any():
             raise ValueError(f"'{condition}' must be constant within each image.")
@@ -105,9 +120,9 @@ def cell_context(cells: pd.DataFrame, condition, subject, ref=None, survival=Fal
         if (pd.Series(image_group).groupby(image_unit).nunique() > 1).any():
             raise ValueError(f"each subject must belong to a single '{condition}' level.")
 
-    type_labels = list(dict.fromkeys(cells["cellType"].astype(str)))
+    type_labels = list(dict.fromkeys(as_str(cells["cellType"])))
     ti = {t: i for i, t in enumerate(type_labels)}
-    type_codes = np.array([ti[t] for t in df["cellType"].astype(str)], dtype=np.int32)
+    type_codes = np.array([ti[t] for t in as_str(df["cellType"])], dtype=np.int32)
     counts = np.zeros((n_images, len(type_labels)))
     np.add.at(counts, (image_codes, type_codes), 1.0)
     offsets = np.concatenate([[0], np.cumsum(np.bincount(image_codes, minlength=n_images))]).astype(np.int32)

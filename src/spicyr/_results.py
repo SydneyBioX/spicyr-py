@@ -298,10 +298,13 @@ class SpicyResults:
         else:
             lines.append(f"Units: {len(set(self.subject))} patients with {len(self.image_ids)} images")
         if "adjusted_for" in t.columns:
-            adj = [a for a in t["adjusted_for"].unique() if a != "none"]
+            adj = [a for a in t["adjusted_for"].unique() if not a.startswith("none")]
             parts = list(dict.fromkeys(p for a in adj for p in a.split("+")))
             if parts:
                 lines.append(f"Adjusted for: {', '.join(parts)} (unadjusted test in the unadjusted_* columns)")
+            fallback = int(t["adjusted_for"].str.startswith("none (").sum())
+            if fallback:
+                lines.append(f"{fallback} pairs could not be adjusted and are reported unadjusted (see adjusted_for)")
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
         if "unadjusted_p_adj" in t.columns:
             sig += f" ({int((t['unadjusted_p_adj'] < 0.05).sum())} without adjustment)"

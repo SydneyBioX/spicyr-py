@@ -91,7 +91,15 @@ def _spatial_experiment(name: str, path=None) -> pd.DataFrame:
     return pd.read_pickle(out)
 
 
-def metabric_ali2020(path: str | os.PathLike | None = None) -> pd.DataFrame:
+def _as_anndata(df):
+    import anndata as ad
+
+    df = df.reset_index(drop=True)
+    df.index = df.index.astype(str)
+    return ad.AnnData(obs=df.drop(columns=["x", "y"]), obsm={"spatial": df[["x", "y"]].to_numpy(float)})
+
+
+def metabric_ali2020(path: str | os.PathLike | None = None, as_anndata: bool = False):
     """Imaging mass cytometry of 483 breast tumours from the METABRIC cohort (Ali et al., Nature Cancer 2020).
 
     One row per cell (433,001 cells): the core (``file_id``), the patient (``metabricId``), the cell type
@@ -101,16 +109,22 @@ def metabric_ali2020(path: str | os.PathLike | None = None) -> pd.DataFrame:
     The file (130 MB) is downloaded once from Bioconductor's ExperimentHub, where the R package SpatialDatasets
     gets it (``spe_Ali_2020``), and cached in ``~/.cache/spicyr`` (or ``$SPICYR_CACHE``). Reading it needs the
     ``rds2py`` package (``pip install "spicyr[data]"``).
+
+    With ``as_anndata=True`` the cells are returned as an AnnData object: the table as ``obs`` and the
+    coordinates in ``obsm["spatial"]`` (needs ``anndata``).
     """
-    return _spatial_experiment("spe_Ali_2020", path)
+    df = _spatial_experiment("spe_Ali_2020", path)
+    return _as_anndata(df) if as_anndata else df
 
 
-def schurch2020(path: str | os.PathLike | None = None) -> pd.DataFrame:
+def schurch2020(path: str | os.PathLike | None = None, as_anndata: bool = False):
     """CODEX imaging of colorectal cancer (Schürch et al., Cell 2020): 35 patients, four tissue cores each.
 
     One row per cell (258,385 cells) with the core (``imageID``), the patient (``patient``), the cell type
     (``cellType``), the coordinates (``x``, ``y``) and the patient group (``group``: 1 = Crohn's-like reaction,
     2 = diffuse inflammatory infiltration). Downloaded from ExperimentHub as ``spe_Schurch_2020`` of the R package
-    SpatialDatasets (82 MB), and cached as for :func:`metabric_ali2020`.
+    SpatialDatasets (82 MB), and cached as for :func:`metabric_ali2020`. ``as_anndata`` as for
+    :func:`metabric_ali2020`.
     """
-    return _spatial_experiment("spe_Schurch_2020", path)
+    df = _spatial_experiment("spe_Schurch_2020", path)
+    return _as_anndata(df) if as_anndata else df

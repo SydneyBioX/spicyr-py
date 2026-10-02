@@ -10,28 +10,25 @@ actually present. Holes, air spaces and uneven cell density therefore do not by 
 Patients, not images or cells, are the units of the test. It needs the type and position of every cell (for
 example imaging mass cytometry, CODEX, MIBI, Xenium or CosMx), not spot-based data.
 
-spicyr is the Python version of the R package [spicyR 2.0](https://github.com/SydneyBioX/spicyR/tree/spicyR2) and
-works with SpatialData, AnnData and pandas objects.
-
 ```{image} _static/spicyR_overview.png
 :width: 100%
 :alt: Left, a tumour cell with a 25 µm circle and the T cells inside it. Right, box plots of the extra T cells per tumour cell, one point per patient, higher in ER-positive than ER-negative tumours.
 ```
 
 ```bash
-pip install "spicyr[plot,data] @ git+https://github.com/SydneyBioX/spicyr-py"
+pip install "spicyr[plot,data,anndata] @ git+https://github.com/SydneyBioX/spicyr-py"
 ```
 
 ```python
 import spicyr
 
-cells = spicyr.datasets.metabric_ali2020()                      # breast cancer imaging mass cytometry
-cells = cells[cells["ER.Status"].isin(["neg", "pos"])]
-res = spicyr.spicy(cells, condition="ER.Status", subject="metabricId", r=25,   # reference group: "neg"
+adata = spicyr.datasets.metabric_ali2020(as_anndata=True)      # breast cancer imaging mass cytometry
+adata = adata[adata.obs["ER.Status"].isin(["neg", "pos"])].copy()
+res = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=25,   # reference group: "neg"
                    image_id="file_id", cell_type="description")
 res.top_pairs()
 res.signif_plot()
-res.box_plot("HR- Ki67+", "T cells")
+res.box_plot("HR- Ki67+", "T cells", interactive=True)
 ```
 
 ```{toctree}

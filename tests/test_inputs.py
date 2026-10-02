@@ -71,3 +71,12 @@ def test_accessors():
     plotly = pytest.importorskip("plotly")
     fig = res.box_plot("tumour", "T", interactive=True)
     assert any(tr.type == "scatter" and "image:" in tr.text[0] for tr in fig.data)
+
+
+def test_numeric_levels_are_named_as_in_r():
+    # a float column made categorical: levels "1", "2", as R's factor(), not "1.0", "2.0"
+    cells = CELLS.copy()
+    pat = sorted(cells["patient"].unique())
+    cells["grade"] = pd.Categorical(cells["patient"].map({p: float(1 + i % 3) for i, p in enumerate(pat)}))
+    res = spicyr.spicy(cells, condition="condition", subject="patient", r=30, from_="tumour", to="T", covariates="grade")
+    assert {"grade2_effect", "grade3_p_value"} <= set(res.cell_results.columns)
