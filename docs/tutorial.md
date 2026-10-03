@@ -458,11 +458,14 @@ permutations. The effect of an image is
 $$\delta = \frac{O - \mathrm{E}_{\mathrm{RL}}(O)}{n - \mathrm{E}_{\mathrm{RL}}(O)},$$
 
 where $\mathrm{E}_{\mathrm{RL}}(O)$ is that expectation under random labelling. If a fraction $f$ of the `to`
-cells were placed next to `from` cells and the rest at random, $\delta$ would estimate $f$. Negative values mean
+cells were placed next to `from` cells and the rest at random, $\delta$ would estimate $f$. At radius $r$, $O/n$ is
+the cross-type nearest-neighbour distribution function $G$ of spatial statistics, and $\delta$ compares it with
+random labelling, much as the J function compares $G$ with the empty-space function (van Lieshout and Baddeley
+1996). Negative values mean
 fewer `to` cells next to `from` cells than chance; they are not a fraction, and the lowest possible value,
 $-\mathrm{E}_{\mathrm{RL}}(O)/(n - \mathrm{E}_{\mathrm{RL}}(O))$, is far below zero only where `from` cells are
 common. With `effect="count"`, $O$ is instead the sum, over the `to` cells, of the number of `from` cells within $r$
-of each, and the denominator is $n$.
+of each, and the denominator is $n$, an analogue of Ripley's K function.
 
 Images from the same patient are combined, giving more weight to more informative images (usually those with more
 `to` cells). Each patient has its own true effect, which varies around its group's mean by an amount estimated
