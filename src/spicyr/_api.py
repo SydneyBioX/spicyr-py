@@ -45,17 +45,22 @@ def spicy(
 
     In each image, the share of ``to`` cells with at least one ``from`` cell within ``r`` is compared with its exact
     expectation q if the ``to`` cells were a random choice among the cells that are not ``from`` cells (random
-    labelling of the observed cells). The effect (``effect="allocation"``, the default) is the **extra fraction of**
-    ``to`` **cells placed next to** ``from`` **cells**, (observed share - q) / (1 - q): if a fraction f of the ``to``
-    cells were moved next to ``from`` cells, the effect is f, however many ``from`` cells there are and however densely
-    they are packed. ``effect="count"`` gives the number of extra ``from`` cells within ``r`` of each ``to`` cell
+    labelling of the observed cells). The effect (``effect="allocation"``, the default) is the **fraction of** ``to``
+    **cells placed next to (or kept away from)** ``from`` **cells**. For a pair that attracts (more ``to`` cells next to
+    ``from`` cells than q over all images together) it is (observed share - q) / (1 - q): if a fraction f of the ``to``
+    cells were moved next to ``from`` cells, the effect is f. For a pair that avoids it is (observed share - q) / q: if
+    a fraction f of the ``to`` cells that would have a ``from`` cell nearby were moved away, the effect is -f. Either
+    way it does not depend on how many ``from`` cells there are or how densely they are packed. The side is chosen
+    once per pair from all images, without the conditions, and is reported in the ``side`` column.
+    ``effect="count"`` gives the number of extra ``from`` cells within ``r`` of each ``to`` cell
     instead; it also reflects how many ``from`` cells surround a ``to`` cell (depth of infiltration), but it grows
     with how densely the ``from`` cells are packed. Images are combined within patients (``subject``) and patients
     within conditions by a frailty GEE, and the difference is tested with a CR2 variance on Satterthwaite degrees of
     freedom, with **patients as the units**. The difference is adjusted for any ``covariates`` and, with
     ``adjust_abundance=True``, for the log share of the ``from`` type in each image; the unadjusted test is then
     reported alongside (``unadjusted_*`` columns). When nearly every cell has a ``from`` cell within ``r`` (q close to
-    1), an image carries little information on the allocation scale, and a smaller ``r`` is more informative.
+    1), there is little room for attraction and an attracting pair's images carry little information; a smaller ``r``
+    is more informative.
 
     ``from`` is spelled ``from_`` because ``from`` is a Python keyword (``**{"from": ...}`` also works).
 
@@ -79,7 +84,7 @@ def spicy(
     method
         "cell" (spicyR Cell). The image-level method of spicyR is not yet available in Python.
     effect
-        "allocation" (default): the extra fraction of ``to`` cells with at least one ``from`` cell within ``r``;
+        "allocation" (default): the fraction of ``to`` cells moved next to (or away from) ``from`` cells within ``r``;
         "count": the number of extra ``from`` cells within ``r`` of each ``to`` cell. With ``k``, "within ``r``"
         means among the cell's ``k`` nearest neighbours.
     k
@@ -291,6 +296,7 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
         fits.append({"from": f, "to": t, "ok": s["ok"], "reason": s["reason"], "rows": rws, "surv": s})
         if s["ok"]:
             rows.append(
+                _cell.add_side(
                 {
                     "from": f,
                     "to": t,
@@ -307,7 +313,9 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
                     "adjusted_for": "+".join(parts) or "none",
                     "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
                     "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan,
-                }
+                },
+                fits[-1],
+                )
             )
     tab = pd.DataFrame(rows) if rows else None
     if tab is not None:

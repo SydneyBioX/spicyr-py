@@ -25,8 +25,9 @@ class SpicyResults:
     """Results of :func:`spicyr.spicy`.
 
     ``cell_results`` is the full table, one row per pair (and per level when there are more than two
-    conditions): the effect (``effect``: "allocation", the extra fraction of ``to`` cells with a ``from`` cell within
-    ``r``, or "count", the extra ``from`` cells per ``to`` cell) in the reference condition (``excess_ref``) and the
+    conditions): for the allocation effect the pair's ``side`` ("attract" or "avoid", which sets its scale), the effect
+    (``effect``: "allocation", the fraction of ``to`` cells moved next to or away from ``from`` cells within ``r``,
+    or "count", the extra ``from`` cells per ``to`` cell) in the reference condition (``excess_ref``) and the
     comparison condition, the
     difference, its standard error, Satterthwaite df, p-value and BH-adjusted p-value, the frailty variance
     ``tau2``, what the test was adjusted for (``adjusted_for``), the effect and p-value of each adjustment

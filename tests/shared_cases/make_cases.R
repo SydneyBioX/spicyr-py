@@ -1,6 +1,6 @@
 ## Shared test cases for the twins: spicyR (R) computes the expected results; the Python tests
 ## (tests/test_shared_cases.py) must reproduce them. Rerun after any change to the core or to either front end:
-##   Rscript tests/shared_cases/make_cases.R      (needs spicyR >= 1.99.5)
+##   Rscript tests/shared_cases/make_cases.R      (needs spicyR >= 1.99.6)
 suppressPackageStartupMessages(library(spicyR))
 out_dir <- file.path("tests", "shared_cases")
 set.seed(20261002)

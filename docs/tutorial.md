@@ -24,7 +24,10 @@ are. For each `to` cell, spicyr checks whether there is a `from` cell within a r
 `to` cells that have one with what we would expect if the `to` cells were a random choice among the cells of the
 same image that are not `from` cells. The effect is the **extra fraction of `to` cells placed next to `from`
 cells**, beyond chance: 0.2 means as if a fifth of the `to` cells had been moved next to `from` cells and the rest
-left where chance would put them. Each `to` cell counts once, however many `from` cells are beside it, so more
+left where chance would put them. For a pair whose `to` cells avoid the `from` cells (fewer have one nearby than
+chance, over all images), the effect is measured the other way: -0.2 means as if a fifth of the `to` cells that
+chance would put next to a `from` cell had been moved away. The `side` column says which scale a pair uses. Each
+`to` cell counts once, however many `from` cells are beside it, so more
 numerous or more tightly packed `from` cells do not inflate the effect. Because the comparison uses only the cells
 that are actually there, empty regions such as holes or air spaces, and uneven cell density, do not by themselves
 create a signal (artefacts that affect one cell type more than others are not removed). spicyr then compares the
@@ -488,7 +491,7 @@ in both groups and can give too many small p-values for rare cell types, so it i
 
 ## Reporting results
 
-A methods sentence might read: "We used spicyr (version 1.99.5) to test, for every ordered pair of cell types,
+A methods sentence might read: "We used spicyr (version 1.99.6) to test, for every ordered pair of cell types,
 whether the fraction of `to` cells with at least one `from` cell within 25 µm, relative to random labelling of the
 cells in each image, differed between ER+ and ER− patients, with patients as the units of analysis. P-values were adjusted across pairs by the Benjamini–Hochberg method." Show a
 per-patient plot (`box_plot()`) and an image of the pair (`plot_image()`) alongside the p-value. Please cite

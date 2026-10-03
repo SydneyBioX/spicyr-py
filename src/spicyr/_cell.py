@@ -199,11 +199,22 @@ def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     rows["unit"] = ctx.image_unit[rows["img"]].astype(np.int32)
     if ctx.image_group is not None:
         rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)
+    if g.effect == "allocation":
+        # the pair's side, chosen in the core from all images (attraction scales by 1 - q, avoidance by q)
+        rows["side"] = "avoid" if float(np.sum(rows["O"] - rows["E"])) < 0 else "attract"
     return rows
 
 
 def _subset_rows(rows, keep) -> dict:
-    return {k: v[keep] for k, v in rows.items()}
+    return {k: (v[keep] if isinstance(v, np.ndarray) else v) for k, v in rows.items()}
+
+
+def add_side(row: dict, o: dict) -> dict:
+    """Add the allocation side of a fit to its table row."""
+    rows = o.get("rows")
+    if rows is not None and "side" in rows:
+        row["side"] = rows["side"]
+    return row
 
 
 def _share(ctx, rows, f):
@@ -372,6 +383,7 @@ FIRST_COLUMNS = [
     "to",
     "level",
     "r",
+    "side",
     "excess_ref",
     "excess_comp",
     "excess_difference",
@@ -411,6 +423,7 @@ def cell_table(fits, ctx, adjusted) -> pd.DataFrame | None:
             "p_value": x["p"],
             "tau2": x["tau2"],
         }
+        add_side(row, o)
         if adjusted:
             row["adjusted_for"] = o["adjusted_for"]
             _add_effects(row, o, enames)
@@ -450,6 +463,7 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
                 "p_value": d["p"],
                 "tau2": d["tau2"],
             }
+            add_side(row, o)
             if adjusted:
                 row["adjusted_for"] = o["adjusted_for"]
                 _add_effects(row, o, enames)
