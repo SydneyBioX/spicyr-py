@@ -313,8 +313,11 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
     if tab is not None:
         tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
         tab["unadjusted_p_adj"] = _cell.p_adjust_bh(tab["unadjusted_p_value"])
+        # the unadjusted columns are the test without the abundance adjustment (covariates enter both null Cox models)
+        if not adjust:
+            tab = tab.drop(columns=[c for c in tab.columns if c.startswith("unadjusted_")])
         if not adjust and covariates is None:
-            tab = tab.drop(columns=["adjusted_for"] + [c for c in tab.columns if c.startswith("unadjusted_")])
+            tab = tab.drop(columns=["adjusted_for"])
         tab.index = tab["from"] + "__" + tab["to"]
     return {"table": tab, "fits": fits}
 

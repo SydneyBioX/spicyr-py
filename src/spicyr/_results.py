@@ -427,7 +427,8 @@ class SpicyResults:
             adj = [a for a in t["adjusted_for"].unique() if not a.startswith("none")]
             parts = list(dict.fromkeys(p for a in adj for p in a.split("+")))
             if parts:
-                lines.append(f"Adjusted for: {', '.join(parts)} (unadjusted test in the unadjusted_* columns)")
+                note = " (unadjusted test in the unadjusted_* columns)" if "unadjusted_p_adj" in t.columns else ""
+                lines.append(f"Adjusted for: {', '.join(parts)}{note}")
             fallback = int(t["adjusted_for"].str.startswith("none (").sum())
             if fallback:
                 lines.append(f"{fallback} pairs could not be adjusted and are reported unadjusted (see adjusted_for)")

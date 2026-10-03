@@ -4,9 +4,9 @@
 
 Do T cells gather around tumour cells more in one group of patients than in another? spicyr tests this for every
 pair of cell types in imaging and spatial transcriptomics data, comparing groups of patients or relating
-co-localisation to survival. For each image it counts the cells of one type within a radius of each cell of another,
-and compares that count with what you would expect if the cells had been labelled at random, using the cells
-actually present. Holes, air spaces and uneven cell density therefore do not by themselves create a signal.
+co-localisation to survival. For each image it asks what fraction of the cells of one type have a cell of another
+type within a radius, and compares that with what you would expect if the cells had been labelled at random, using
+the cells actually present. Holes, air spaces and uneven cell density therefore do not by themselves create a signal.
 Patients, not images or cells, are the units of the test. It needs the type and position of every cell (for
 example imaging mass cytometry, CODEX, MIBI, Xenium or CosMx), not spot-based data.
 

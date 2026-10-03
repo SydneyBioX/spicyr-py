@@ -9,13 +9,13 @@
 
 Do T cells gather around tumour cells more in one group of patients than in another? spicyr tests this for every
 pair of cell types in imaging and spatial transcriptomics data, comparing groups of patients or relating
-co-localisation to survival. For each image it counts the cells of one type within a radius of each cell of another,
-and compares that count with what you would expect if the cells had been labelled at random, using the cells
-actually present. Holes, air spaces and uneven cell density therefore do not by themselves create a signal.
+co-localisation to survival. For each image it asks what fraction of the cells of one type have a cell of another
+type within a radius, and compares that with what you would expect if the cells had been labelled at random, using
+the cells actually present. Holes, air spaces and uneven cell density therefore do not by themselves create a signal.
 Patients, not images or cells, are the units of the test. It needs the type and position of every cell (for
 example imaging mass cytometry, CODEX, MIBI, Xenium or CosMx), not spot-based data.
 
-![Left, a tumour cell with a 25 µm circle and the T cells inside it. Right, box plots of the extra T cells per tumour cell, one point per patient, higher in ER-positive than ER-negative tumours.](docs/_static/spicyR_overview.png)
+![Left, tumour cells marked by whether a T cell lies within 25 µm, with the circle drawn around two of them. Right, box plots of the extra fraction of tumour cells next to T cells, one point per patient, higher in ER-positive than ER-negative tumours.](docs/_static/spicyR_overview.png)
 
 ## Quick start
 
@@ -28,21 +28,20 @@ res = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=25,   #
                    image_id="file_id", cell_type="description")
 res.top_pairs()                                        # the most significant pairs
 res.signif_plot()                                      # every pair at a glance
-res.box_plot("T cells", "HR- Ki67+", interactive=True)  # T cells around proliferating tumour cells, per image
+res.box_plot("T cells", "HR- Ki67+", interactive=True)  # proliferating tumour cells next to T cells, per image
 ```
 
 For your own data, `spicy()` accepts an AnnData object, a SpatialData object or a pandas DataFrame. It looks for
 the columns `imageID` and `cellType` (name yours with `image_id=` and `cell_type=`) and takes coordinates from
 `obsm["spatial"]`, from the SpatialData annotation table, or from columns `x` and `y`. A pair `from` → `to` asks
-whether `to` cells are placed near `from` cells more than other cells are: how many extra `from` cells sit around
-each `to` cell.
+whether `to` cells are placed near `from` cells more than other cells are: the extra fraction of `to` cells with a
+`from` cell nearby (`effect="count"` gives the number of extra `from` cells around each `to` cell instead).
 
 ## What you get
 
-- A table with one row per pair of cell types: the number of extra neighbours per cell in each group, the
-  difference, a p-value and an FDR-adjusted p-value. By default the test is adjusted for how common the counted
-  cell type is in each image, so that a change in abundance alone is not reported as a change in arrangement; the
-  unadjusted test is reported too.
+- A table with one row per pair of cell types: the extra fraction of `to` cells next to `from` cells in each
+  group, the difference, a p-value and an FDR-adjusted p-value. The effect does not change simply because one group
+  has more `from` cells, or more tightly packed ones.
 - A plot of every pair at once, the per-image values behind any pair (interactive, to find the images worth
   looking at), and a plot of any image.
 - The same test with covariates, several radii, more than two groups, or a survival outcome.
