@@ -9,5 +9,5 @@ from ._input import format_data
 from ._plots import plot_image
 from ._results import SpicyResults
 
-__version__ = "1.99.2"
+__version__ = "1.99.5"
 __all__ = ["spicy", "format_data", "plot_image", "SpicyResults", "datasets", "__version__"]
