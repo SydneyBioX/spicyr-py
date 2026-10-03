@@ -36,7 +36,7 @@ def plot_image(
     """Plot one image, showing the ``from_`` and ``to`` cells of a pair.
 
     The density of all cells is shown in blue, with the ``from_`` cells (gold) and ``to`` cells (dark red) on top.
-    With ``r``, a circle of radius ``r`` is drawn around each ``from_`` cell: the ``to`` cells inside the circles
+    With ``r``, a circle of radius ``r`` is drawn around each ``to`` cell: the ``from_`` cells inside the circles
     are those that :func:`spicyr.spicy` counts.
 
     Parameters
@@ -48,7 +48,7 @@ def plot_image(
     from_, to
         The two cell types (``from`` also works as a keyword).
     r
-        Optional radius of the circles around the ``from_`` cells, in the units of the coordinates.
+        Optional radius of the circles around the ``to`` cells, in the units of the coordinates.
 
     Returns
     -------
@@ -74,11 +74,11 @@ def plot_image(
     _density(ax, z["x"].to_numpy(float), z["y"].to_numpy(float))
     ct = z["cellType"].astype(str)
     f, t = z[ct == from_], z[ct == to]
-    if r is not None and len(f):
+    if r is not None and len(t):
         circles = PatchCollection(
-            [Circle((a, b), r) for a, b in zip(f["x"], f["y"], strict=True)],
+            [Circle((a, b), r) for a, b in zip(t["x"], t["y"], strict=True)],
             facecolor="none",
-            edgecolor="#d6b11c",
+            edgecolor="#850f07",
             linewidth=0.5,
             alpha=0.7,
             zorder=1,

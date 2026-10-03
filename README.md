@@ -28,13 +28,14 @@ res = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=25,   #
                    image_id="file_id", cell_type="description")
 res.top_pairs()                                        # the most significant pairs
 res.signif_plot()                                      # every pair at a glance
-res.box_plot("HR- Ki67+", "T cells", interactive=True)  # T cells around proliferating tumour cells, per image
+res.box_plot("T cells", "HR- Ki67+", interactive=True)  # T cells around proliferating tumour cells, per image
 ```
 
 For your own data, `spicy()` accepts an AnnData object, a SpatialData object or a pandas DataFrame. It looks for
 the columns `imageID` and `cellType` (name yours with `image_id=` and `cell_type=`) and takes coordinates from
 `obsm["spatial"]`, from the SpatialData annotation table, or from columns `x` and `y`. A pair `from` → `to` asks
-how many extra `to` cells sit around each `from` cell.
+whether `to` cells are placed near `from` cells more than other cells are: how many extra `from` cells sit around
+each `to` cell.
 
 ## What you get
 

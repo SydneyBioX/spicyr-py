@@ -19,10 +19,10 @@ nothing to find.
 
 ## Overview
 
-A pair is written `from` → `to`. For each `from` cell, spicyr counts the `to` cells within a radius, and compares
-that count with what we would expect if the `from` cells were a random choice among the cells of the same image that
-are not `to` cells. The difference is the **excess**: the number of extra `to` cells around each `from` cell,
-beyond chance. Because the comparison uses only the cells that are actually there, empty regions such as holes or
+A pair is written `from` → `to` and asks whether `to` cells are placed near `from` cells more than other cells
+are. For each `to` cell, spicyr counts the `from` cells within a radius, and compares that count with what we would
+expect if the `to` cells were a random choice among the cells of the same image that are not `from` cells. The
+difference is the **excess**: the number of extra `from` cells around each `to` cell, beyond chance. Because the comparison uses only the cells that are actually there, empty regions such as holes or
 air spaces, and uneven cell density, do not by themselves create a signal. spicyr then compares the excess between
 groups of patients, treating patients, not images or cells, as the units of the test.
 
@@ -30,13 +30,14 @@ groups of patients, treating patients, not images or cells, as the units of the 
 :width: 100%
 :alt: Left, a tumour cell with a 25 µm circle and the T cells inside it. Right, box plots of the extra T cells per tumour cell, one point per patient, higher in ER-positive than ER-negative tumours.
 
-For each proliferating tumour cell (red), spicyr counts the T cells (blue) within 25 µm and compares the count
-with chance. Each patient gets an excess, and the excess is compared between ER-negative and ER-positive tumours.
+The pair T cells → proliferating tumour cells. For each proliferating tumour cell (red, the `to` type), spicyr
+counts the T cells (blue, the `from` type) within 25 µm and compares the count with chance. Each patient gets an excess, and the excess is compared between ER-negative and ER-positive tumours.
 ```
 
 :::{note}
-Pairs are directional. T cells → tumour cells asks how many extra tumour cells sit around each T cell, which is a
-different question from tumour cells → T cells.
+Pairs are directional. Tumour cells → T cells asks whether T cells are placed near tumour cells (extra tumour
+cells around each T cell), which is a different question from T cells → tumour cells (are tumour cells placed near
+T cells?).
 :::
 
 spicyr needs the type and position of every cell, as from imaging mass cytometry, CODEX, MIBI, Xenium, CosMx or
@@ -139,11 +140,11 @@ res
 
 All 484 ordered pairs of cell types are tested in about ten seconds on one core. Run time and memory grow roughly
 in proportion to the number of cells and to the radius. By default each comparison is adjusted for how common the
-`to` type is in each image, for reasons we come to in [Why adjust for abundance?](#why-adjust-for-abundance).
+`from` type is in each image, for reasons we come to in [Why adjust for abundance?](#why-adjust-for-abundance).
 
 `top_pairs()` lists the most significant pairs. `intercept` is the average excess in ER− patients, and
-`coefficient` is the difference in average excess between ER+ and ER− patients (ER+ minus ER−), in extra `to` cells
-per `from` cell. P-values are adjusted across all pairs by the Benjamini–Hochberg method.
+`coefficient` is the difference in average excess between ER+ and ER− patients (ER+ minus ER−), in extra `from` cells
+per `to` cell. P-values are adjusted across all pairs by the Benjamini–Hochberg method.
 
 ```{code-cell} ipython3
 res.top_pairs(8)
@@ -166,8 +167,8 @@ With more than two groups there is one row per pair and group, each compared wit
 ## Seeing every pair at once
 
 `signif_plot()` shows the whole study. Read rows as `from` and columns as `to`. Each circle is a pair: the left half
-is coloured by the excess in ER− tumours and the right half by the excess in ER+ tumours (red: more `to` cells than
-chance, blue: fewer), the size reflects the p-value, and a black ring marks a BH-adjusted p-value below 0.05.
+is coloured by the excess in ER− tumours and the right half by the excess in ER+ tumours (red: more `from` cells
+around the `to` cells than chance, blue: fewer), the size reflects the p-value, and a black ring marks a BH-adjusted p-value below 0.05.
 
 ```{code-cell} ipython3
 res.signif_plot(fdr=True, breaks=(-2, 2, 0.5));
@@ -175,10 +176,11 @@ res.signif_plot(fdr=True, breaks=(-2, 2, 0.5));
 
 ## Looking at one pair
 
-We focus on an immune pair: T cells around proliferating hormone-receptor-negative tumour cells.
+We focus on an immune pair, T cells → `HR- Ki67+`: are proliferating hormone-receptor-negative tumour cells placed
+near T cells? Its excess is the number of extra T cells around each of these tumour cells.
 
 ```{code-cell} ipython3
-pair = "HR- Ki67+__T cells"
+pair = "T cells__HR- Ki67+"
 res.cell_results.loc[[pair], ["excess_ref", "excess_comp", "excess_difference", "p_value", "p_adj"]]
 ```
 
@@ -189,18 +191,18 @@ In ER− tumours these tumour cells have no more T cells nearby than chance woul
 Points are sized by how much the image contributes to the test.
 
 ```{code-cell} ipython3
-ax = res.box_plot("HR- Ki67+", "T cells")
+ax = res.box_plot("T cells", "HR- Ki67+")
 ax.set_ylim(-2, 4);
 ```
 
 With `interactive=True` the plot is a plotly figure. Hover over a point to see which image it is.
 
 ```{code-cell} ipython3
-res.box_plot("HR- Ki67+", "T cells", interactive=True)
+res.box_plot("T cells", "HR- Ki67+", interactive=True)
 ```
 
 :::{important}
-This is an association in one cohort; it does not show that the tumour cells attract T cells.
+This is an association in one cohort; it does not show that T cells attract the tumour cells, or the reverse.
 :::
 
 `bind()` returns the per-image values as a DataFrame, for your own plots or models. Images without any `HR- Ki67+`
@@ -213,7 +215,7 @@ res.bind(pair).head(6)
 ## Looking at the images
 
 `plot_image()` shows one image: the density of all cells in blue, the `from` cells in gold and the `to` cells in
-dark red. With `r`, it draws the circle around each `from` cell inside which `to` cells are counted. We look at
+dark red. With `r`, it draws the circle around each `to` cell inside which `from` cells are counted. We look at
 three images found with the interactive box plot.
 
 ```{code-cell} ipython3
@@ -226,7 +228,7 @@ d.loc[examples, ["condition", pair, "weight"]]
 ```{code-cell} ipython3
 fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 for ax, image in zip(axes, examples):
-    spicyr.plot_image(adata, image, "HR- Ki67+", "T cells", r=25, image_id="file_id", cell_type="description", ax=ax)
+    spicyr.plot_image(adata, image, "T cells", "HR- Ki67+", r=25, image_id="file_id", cell_type="description", ax=ax)
     ax.set_title(f"{image} ({d.loc[image, 'condition']}), excess {d.loc[image, pair]:.2f}")
 plt.tight_layout()
 ```
@@ -238,7 +240,7 @@ the largest excess of all, 8.3, but it comes from just two tumour cells that hap
 
 :::{tip}
 Point size matters. The right-hand image is the highest point in the box plot, but its weight is close to zero: an
-excess estimated from two cells says little. Weights also level off. Once an image has a few dozen `from` cells,
+excess estimated from two cells says little. Weights also level off. Once an image has a few dozen `to` cells,
 more cells add little, because patients differ from one another more than repeated counts within a patient do.
 The weights are in `res.image_weights`.
 :::
@@ -246,10 +248,11 @@ The weights are in `res.image_weights`.
 ## Why adjust for abundance?
 
 A cell type that is simply more common will be found more often around any other cell, even if cells are arranged
-no differently. Here the `HR+ CK7-` tumour cells are much more common in ER+ tumours. Without adjustment, almost
-every pair with `HR+ CK7-` as the `to` type looks strongly different between ER+ and ER− patients.
+no differently. Here the `HR+ CK7-` tumour cells are much more common in ER+ tumours. Without adjustment, half of
+the pairs with `HR+ CK7-` as the `from` type (the type counted) differ significantly between ER+ and ER− patients,
+and they are the most significant pairs of all.
 
-By default, spicyr adjusts each comparison for the log of the `to` type's share of all cells in each image. The
+By default, spicyr adjusts each comparison for the log of the `from` type's share of all cells in each image. The
 excess is then compared between groups at the same abundance, and a difference in arrangement is not confused with
 a difference in composition. The unadjusted test is kept in the `unadjusted_*` columns.
 
@@ -258,15 +261,15 @@ tab = res.cell_results.sort_values("unadjusted_p_value")
 tab[["from", "to", "unadjusted_difference", "unadjusted_p_adj", "excess_difference", "p_adj"]].head(8)
 ```
 
-Most pairs with `HR+ CK7-` as the `to` type are no longer significant after the adjustment, so their unadjusted
+All but one of the pairs with `HR+ CK7-` as the `from` type are no longer significant after the adjustment, so their unadjusted
 signal largely reflects abundance. Because abundance differs so much with ER status, the adjusted test also has less
 power for these pairs, so a non-significant adjusted result is not evidence of no effect.
 
 ```{code-cell} ipython3
 fig, ax = plt.subplots(figsize=(5.5, 5.5))
-group = np.where(tab.index == pair, "HR- Ki67+ → T cells",
-                 np.where(tab["to"] == "HR+ CK7-", "HR+ CK7- counted", "other"))
-for g, colour in [("other", "grey"), ("HR+ CK7- counted", "#b3261e"), ("HR- Ki67+ → T cells", "#1f6fb4")]:
+group = np.where(tab.index == pair, "T cells → HR- Ki67+",
+                 np.where(tab["from"] == "HR+ CK7-", "HR+ CK7- counted", "other"))
+for g, colour in [("other", "grey"), ("HR+ CK7- counted", "#b3261e"), ("T cells → HR- Ki67+", "#1f6fb4")]:
     k = group == g
     ax.scatter(np.minimum(-np.log10(tab.loc[k, "unadjusted_p_adj"]), 10), np.minimum(-np.log10(tab.loc[k, "p_adj"]), 10),
                s=14, alpha=0.8, color=colour, label=g)
@@ -346,7 +349,7 @@ alternative).
 ```{code-cell} ipython3
 res_r = spicyr.spicy(adata, condition="ER", subject="metabricId", r=[10, 25, 50, 75],
                      image_id="file_id", cell_type="description")
-res_r.cell_results.loc[[pair, "HR- Ki67+__B cells"], ["r", "excess_difference", "p_value"]]
+res_r.cell_results.loc[[pair, "B cells__HR- Ki67+"], ["r", "excess_difference", "p_value"]]
 ```
 
 `r` is the radius with the strongest evidence, and `p_value` the combined p-value over all radii.
@@ -360,10 +363,10 @@ picked for its strength. This combined test is new, and its calibration is still
 ```{code-cell} ipython3
 rr = res_r.radius_results
 fig, ax = plt.subplots(figsize=(6, 4))
-for to, g in rr[(rr["from"] == "HR- Ki67+") & rr["to"].isin(["T cells", "B cells"])].groupby("to"):
-    ax.plot(g["r"], -np.log10(g["p_value"]), marker="o", label=to)
+for from_, g in rr[(rr["to"] == "HR- Ki67+") & rr["from"].isin(["T cells", "B cells"])].groupby("from"):
+    ax.plot(g["r"], -np.log10(g["p_value"]), marker="o", label=from_)
 ax.set(ylim=(0, None), xlabel="radius (µm)", ylabel="-log10 p at each radius, ER+ vs ER-")
-ax.legend(title="around HR- Ki67+", frameon=False);
+ax.legend(title="counted around HR- Ki67+", frameon=False);
 ```
 
 ## Is co-localisation associated with survival?
@@ -387,7 +390,7 @@ hazard ratio for a one standard deviation higher excess, from a Cox model; below
 had a lower risk of relapse. It is missing when the excess barely varies between patients.
 
 No pair is significant after adjusting for multiple testing. Without the abundance adjustment, three pairs are,
-all with tumour cell types as the `to` type. Tumour composition is itself prognostic, so those three may reflect
+all with tumour cell types as the `from` type. Tumour composition is itself prognostic, so those three may reflect
 composition as much as the arrangement of cells.
 
 ## A check you can run
@@ -431,21 +434,21 @@ calibrated for your study design.
 
 ## How it works
 
-For a pair `from` → `to` and an image, let $O$ be the number of `to` cells within $r$ of the `from` cells. If the
-`from` cells were a random choice among the cells of the image that are not `to` cells, keeping every cell where it
+For a pair `from` → `to` and an image, let $O$ be the number of `from` cells within $r$ of the `to` cells. If the
+`to` cells were a random choice among the cells of the image that are not `from` cells, keeping every cell where it
 is, $O$ would have an exact mean and variance, which spicyr computes without permutations. The excess of an image is
 
 $$\delta = \frac{O - \mathrm{E}_{\mathrm{RL}}(O)}{n},$$
 
-where $\mathrm{E}_{\mathrm{RL}}(O)$ is that expectation under random labelling and $n$ is the number of `from`
+where $\mathrm{E}_{\mathrm{RL}}(O)$ is that expectation under random labelling and $n$ is the number of `to`
 cells.
 
 Images from the same patient are combined, giving more weight to more informative images (usually those with more
-`from` cells). Each patient has its own true excess, which varies around its group's mean by an amount estimated
+`to` cells). Each patient has its own true excess, which varies around its group's mean by an amount estimated
 from the data (a frailty, or random-effects, model). The difference between groups, adjusted for the log share of
-the `to` type in each image and any covariates, is tested with a small-sample cluster-robust (CR2) variance on
+the `from` type in each image and any covariates, is tested with a small-sample cluster-robust (CR2) variance on
 Satterthwaite degrees of freedom, with patients as the clusters. This is designed to keep false positives near the
-nominal rate even with modest numbers of patients. When the `from` cells cluster among themselves, the
+nominal rate even with modest numbers of patients. When the `to` cells cluster among themselves, the
 within-image variance is inflated to match. A paper describing the method is in preparation.
 
 ## Small studies
@@ -461,9 +464,9 @@ in both groups and can give too many small p-values for rare cell types, so it i
 
 ## Reporting results
 
-A methods sentence might read: "We used spicyr (version 1.99.0) to test, for every ordered pair of cell types,
-whether the number of `to` cells within 25 µm of each `from` cell, relative to random labelling of the cells in each
-image, differed between ER+ and ER− patients, adjusting for the abundance of the `to` type in each image, with
+A methods sentence might read: "We used spicyr (version 1.99.2) to test, for every ordered pair of cell types,
+whether the number of `from` cells within 25 µm of each `to` cell, relative to random labelling of the cells in each
+image, differed between ER+ and ER− patients, adjusting for the abundance of the `from` type in each image, with
 patients as the units of analysis. P-values were adjusted across pairs by the Benjamini–Hochberg method." Show a
 per-patient plot (`box_plot()`) and an image of the pair (`plot_image()`) alongside the p-value. Please cite
 Canete et al. (2022), *Bioinformatics* 38(11), 3099–3105; a paper describing the cell-level test is in preparation.

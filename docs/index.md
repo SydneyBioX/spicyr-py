@@ -28,7 +28,7 @@ res = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=25,   #
                    image_id="file_id", cell_type="description")
 res.top_pairs()
 res.signif_plot()
-res.box_plot("HR- Ki67+", "T cells", interactive=True)
+res.box_plot("T cells", "HR- Ki67+", interactive=True)
 ```
 
 ```{toctree}

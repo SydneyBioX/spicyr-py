@@ -145,7 +145,7 @@ class SpicyResults:
         d["relative"] = d["weight"] / d.groupby("condition")["weight"].transform("mean")
         groups = [g for g in (self.levels or []) if (d["condition"] == g).any()]
         sized = bool(np.isfinite(d["relative"]).any())
-        ylabel, title = f"Extra {to} per {from_}<br>(beyond chance)", f"{to} around {from_}"
+        ylabel, title = f"Extra {from_} per {to}<br>(beyond chance)", f"{from_} around {to}"
         if interactive:
             return self._box_plotly(d, groups, sized, ylabel, title)
         import matplotlib.pyplot as plt
@@ -319,8 +319,8 @@ class SpicyResults:
         ax.set_aspect("equal")
         ax.set_xticks(range(len(xs)), xs, rotation=45, ha="right")
         ax.set_yticks(range(len(ys)), ys)
-        ax.set_xlabel("to (counted)")
-        ax.set_ylabel("from (centre)")
+        ax.set_xlabel("to (centre)")
+        ax.set_ylabel("from (counted)")
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
 

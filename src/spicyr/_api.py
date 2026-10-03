@@ -39,12 +39,14 @@ def spicy(
 ) -> SpicyResults:
     """Test whether the co-localisation of cell types differs between conditions, or is associated with survival.
 
-    Every ordered pair of cell types ``from_ -> to`` is tested.
+    Every ordered pair of cell types ``from_ -> to`` is tested: are ``to`` cells placed near ``from`` cells more than
+    other cells are?
 
-    The effect is the **excess**: the number of extra ``to`` cells within ``r`` of each ``from`` cell, beyond
-    random labelling of the observed cells. Images are combined within patients (``subject``) and patients within
+    The effect is the **excess**: the number of extra ``from`` cells within ``r`` of each ``to`` cell, beyond the
+    ``to`` cells being a random choice among the cells that are not ``from`` cells (random labelling of the observed
+    cells). Images are combined within patients (``subject``) and patients within
     conditions by a frailty GEE, and the difference is tested with a CR2 variance on Satterthwaite degrees of
-    freedom, with **patients as the units**. By default the difference is adjusted for how common the ``to`` type
+    freedom, with **patients as the units**. By default the difference is adjusted for how common the ``from`` type
     is in each image (the log of its share of all cells) and for any ``covariates``, so that a change in abundance
     alone does not appear as a change in co-localisation. The unadjusted test is reported alongside
     (``unadjusted_*`` columns).
@@ -73,7 +75,7 @@ def spicy(
     k
         Use the ``k`` nearest neighbours instead of a radius.
     adjust_abundance
-        Adjust the test for the log share of the ``to`` type in each image (default ``True``). Its effect is
+        Adjust the test for the log share of the ``from`` type in each image (default ``True``). Its effect is
         reported as ``abundance_effect``. ``False`` gives the test without it.
     variance
         "cr2" (default) or "hartung_knapp" (for very few patients).
@@ -116,8 +118,9 @@ def spicy(
     ]
     if bad:
         raise ValueError(f"cell type not found: {bad}")
-    # from -> to: extra `to` cells around each `from` cell; the core works in (counted, centre) order
-    pairs = [(t, f) for f, t in _cell.enumerate_pairs(from_, to, types)]
+    # from -> to: extra `from` cells around each `to` cell, beyond the `to` cells being a random subset of the cells
+    # that are not `from` cells. This is the core's own (counted, centre) order, so pairs pass through as given.
+    pairs = list(_cell.enumerate_pairs(from_, to, types))
     if is_surv:
         df[".time"] = df[condition].astype(float)
         df[".event"] = df[survival].astype(float)
@@ -290,33 +293,17 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
     return {"table": tab, "fits": fits}
 
 
-def _swap(d: pd.DataFrame | None):
-    if d is None:
-        return None
-    d = d.copy()
-    d["from"], d["to"] = d["to"].to_numpy(), d["from"].to_numpy()
-    if "level" in d.columns:
-        d.index = d["from"] + "__" + d["to"] + "__" + d["level"]
-    elif not (d["from"] + "__" + d["to"]).duplicated().any():
-        d.index = d["from"] + "__" + d["to"]
-    else:
-        d = d.reset_index(drop=True)
-    return d
-
-
 def _results(res, ctx, pheno, condition, subject, survival, radii, k) -> SpicyResults:
-    tab = _swap(res["table"])
+    tab = res["table"]
     if tab is None:
         raise ValueError("no pair could be tested (each condition needs at least two patients with both cell types).")
     pa = _cell.cell_image_excess(res["fits"], ctx)
-    pa = {"__".join(reversed(key.split("__"))): v for key, v in pa.items()}
     w = _cell.cell_image_weight(res["fits"], ctx)
-    w = {"__".join(reversed(key.split("__"))): v for key, v in w.items()}
     return SpicyResults(
         cell_results=tab,
         levels=ctx.levels,
         survival=survival,
-        radius_results=_swap(res.get("radius_table")),
+        radius_results=res.get("radius_table"),
         image_ids=list(ctx.image_labels),
         condition=(None if survival else [ctx.levels[g] for g in ctx.image_group]),
         subject=(None if subject is None else _cell.as_str(pheno[subject]).tolist()),
