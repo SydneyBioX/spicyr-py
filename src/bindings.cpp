@@ -78,7 +78,9 @@ PYBIND11_MODULE(_core, m) {
       .def("build_radius_index", &Dataset::build_radius_index, py::arg("r"))
       .def("build_knn", &Dataset::build_knn, py::arg("k"), py::arg("n_threads") = 1)
       .def("pair_neighbour_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_totals(knn)); })
-      .def("pair_neighbour_out_sq_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_out_sq_totals(knn)); });
+      .def("pair_neighbour_out_sq_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_out_sq_totals(knn)); })
+      .def("pair_neighbour_any_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_any_totals(knn)); })
+      .def("self_any_expected", [](const Dataset& d, bool knn) { return arr(d.self_any_expected(knn)); });
 
   m.def("pt_two_sided", [](double t, double df) { return pt_two_sided(t, df); });
   m.def("norm_quantile", [](double p) { return norm_quantile(p); });
@@ -90,10 +92,18 @@ PYBIND11_MODULE(_core, m) {
                                      knn, vec<double>(psi)));
   });
 
-  m.def("label_clustering_factor", [](const Dataset& d, const IntArray& from, const IntArray& to, const DoubleArray& counts,
-                                      int n_types, bool knn, double h) {
+  m.def("allocation_image_rows", [](const DoubleArray& any_totals, const DoubleArray& self_expected, const DoubleArray& counts,
+                                    int n_types, int from, int to, const DoubleArray& psi) {
     int n_images = static_cast<int>(counts.size() / n_types);
-    return arr(label_clustering_factor(d, vec<int>(from), vec<int>(to), image_major(counts), n_types, n_images, knn, h));
+    return rows_to(allocation_image_rows(vec<double>(any_totals), vec<double>(self_expected), image_major(counts), n_types,
+                                         n_images, from, to, vec<double>(psi)));
+  });
+
+  m.def("label_clustering_factor", [](const Dataset& d, const IntArray& from, const IntArray& to, const DoubleArray& counts,
+                                      int n_types, bool knn, double h, bool allocation) {
+    int n_images = static_cast<int>(counts.size() / n_types);
+    return arr(label_clustering_factor(d, vec<int>(from), vec<int>(to), image_major(counts), n_types, n_images, knn, h,
+                                       allocation));
   });
 
   m.def("excess_test", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_units, bool frailty,

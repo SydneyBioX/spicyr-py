@@ -1,6 +1,6 @@
 ## Shared test cases for the twins: spicyR (R) computes the expected results; the Python tests
 ## (tests/test_shared_cases.py) must reproduce them. Rerun after any change to the core or to either front end:
-##   Rscript tests/shared_cases/make_cases.R      (needs spicyR >= 1.99.0)
+##   Rscript tests/shared_cases/make_cases.R      (needs spicyR >= 1.99.5)
 suppressPackageStartupMessages(library(spicyR))
 out_dir <- file.path("tests", "shared_cases")
 set.seed(20261002)
@@ -24,7 +24,11 @@ utils::write.csv(cells, file.path(out_dir, "cells.csv"), row.names = FALSE)
 
 cases <- list(
   two_groups = list(condition = "condition", subject = "patient", r = 30),
-  unadjusted = list(condition = "condition", subject = "patient", r = 30, adjustAbundance = FALSE),
+  adjusted = list(condition = "condition", subject = "patient", r = 30, adjustAbundance = TRUE),
+  count = list(condition = "condition", subject = "patient", r = 30, effect = "count"),
+  count_adjusted = list(condition = "condition", subject = "patient", r = 30, effect = "count", adjustAbundance = TRUE),
+  knn_count = list(condition = "condition", subject = "patient", k = 10, from = c("tumour", "macro"), to = c("T", "B"), effect = "count"),
+  survival_count = list(condition = "os", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B", "macro"), covariates = "age", effect = "count"),
   hk_no_clustering = list(condition = "condition", subject = "patient", r = 30, variance = "hartung_knapp", labelClustering = FALSE),
   images_as_units = list(condition = "condition", r = 30, from = "tumour", to = c("T", "B")),
   three_levels = list(condition = "stage", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B")),

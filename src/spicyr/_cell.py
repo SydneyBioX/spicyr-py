@@ -146,12 +146,21 @@ def cell_context(cells: pd.DataFrame, condition, subject, ref=None, survival=Fal
 @dataclass
 class Graph:
     knn: bool
-    totals: np.ndarray
-    sq: np.ndarray
+    effect: str
     psi: np.ndarray
+    totals: np.ndarray | None = None
+    sq: np.ndarray | None = None
+    any: np.ndarray | None = None
+    self_expected: np.ndarray | None = None
 
 
-def cell_graph(ctx: Context, pairs, r=None, k=None, label_clustering=True, window="convex", n_threads=1) -> Graph:
+def cell_graph(
+    ctx: Context, pairs, r=None, k=None, label_clustering=True, window="convex", n_threads=1, effect="allocation"
+) -> Graph:
+    """Neighbour sums and the label-clustering factor at one radius (or k).
+
+    effect "allocation": for every cell, whether it has any cell of each type among its neighbours; "count": how many.
+    """
     knn = k is not None
     T = len(ctx.type_labels)
     if knn:
@@ -163,28 +172,30 @@ def cell_graph(ctx: Context, pairs, r=None, k=None, label_clustering=True, windo
     else:
         ctx.data.build_radius_index(float(r))
         h = 2 * float(r)
-    totals = ctx.data.pair_neighbour_totals(knn)
-    sq = ctx.data.pair_neighbour_out_sq_totals(knn)
-    if label_clustering:
-        f = np.array([ctx.type_labels.index(p[0]) for p in pairs], dtype=np.int32)
-        t = np.array([ctx.type_labels.index(p[1]) for p in pairs], dtype=np.int32)
-        psi = _core.label_clustering_factor(ctx.data, f, t, ctx.counts, T, knn, h)
+    allocation = effect == "allocation"
+    if allocation:
+        g = Graph(knn, effect, np.zeros(0), any=ctx.data.pair_neighbour_any_totals(knn),
+                  self_expected=ctx.data.self_any_expected(knn))
     else:
-        psi = np.zeros(0)
-    return Graph(knn, totals, sq, psi)
+        g = Graph(knn, effect, np.zeros(0), totals=ctx.data.pair_neighbour_totals(knn),
+                  sq=ctx.data.pair_neighbour_out_sq_totals(knn))
+    if label_clustering:
+        # psi of a `to` type is the median over every counted type (not only the requested pairs), so a pair's result
+        # does not depend on which other pairs were asked for
+        tos = list(dict.fromkeys(p[1] for p in pairs))
+        f = np.array([ctx.type_labels.index(a) for t in tos for a in ctx.type_labels], dtype=np.int32)
+        t = np.array([ctx.type_labels.index(t) for t in tos for _ in ctx.type_labels], dtype=np.int32)
+        g.psi = _core.label_clustering_factor(ctx.data, f, t, ctx.counts, T, knn, h, allocation)
+    return g
 
 
 def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
-    rows = _core.excess_image_rows(
-        g.totals,
-        g.sq,
-        ctx.counts,
-        len(ctx.type_labels),
-        ctx.type_labels.index(f),
-        ctx.type_labels.index(t),
-        g.knn,
-        g.psi,
-    )
+    T = len(ctx.type_labels)
+    fc, tc = ctx.type_labels.index(f), ctx.type_labels.index(t)
+    if g.effect == "allocation":
+        rows = _core.allocation_image_rows(g.any, g.self_expected, ctx.counts, T, fc, tc, g.psi)
+    else:
+        rows = _core.excess_image_rows(g.totals, g.sq, ctx.counts, T, fc, tc, g.knn, g.psi)
     rows["unit"] = ctx.image_unit[rows["img"]].astype(np.int32)
     if ctx.image_group is not None:
         rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)

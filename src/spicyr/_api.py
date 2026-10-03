@@ -25,9 +25,10 @@ def spicy(
     from_=None,
     to=None,
     method="cell",
+    effect="allocation",
     k=None,
     combine="maxT",
-    adjust_abundance=True,
+    adjust_abundance=False,
     variance="cr2",
     frailty=True,
     label_clustering=True,
@@ -42,14 +43,19 @@ def spicy(
     Every ordered pair of cell types ``from_ -> to`` is tested: are ``to`` cells placed near ``from`` cells more than
     other cells are?
 
-    The effect is the **excess**: the number of extra ``from`` cells within ``r`` of each ``to`` cell, beyond the
-    ``to`` cells being a random choice among the cells that are not ``from`` cells (random labelling of the observed
-    cells). Images are combined within patients (``subject``) and patients within
-    conditions by a frailty GEE, and the difference is tested with a CR2 variance on Satterthwaite degrees of
-    freedom, with **patients as the units**. By default the difference is adjusted for how common the ``from`` type
-    is in each image (the log of its share of all cells) and for any ``covariates``, so that a change in abundance
-    alone does not appear as a change in co-localisation. The unadjusted test is reported alongside
-    (``unadjusted_*`` columns).
+    In each image, the share of ``to`` cells with at least one ``from`` cell within ``r`` is compared with its exact
+    expectation q if the ``to`` cells were a random choice among the cells that are not ``from`` cells (random
+    labelling of the observed cells). The effect (``effect="allocation"``, the default) is the **extra fraction of**
+    ``to`` **cells placed next to** ``from`` **cells**, (observed share - q) / (1 - q): if a fraction f of the ``to``
+    cells were moved next to ``from`` cells, the effect is f, however many ``from`` cells there are and however densely
+    they are packed. ``effect="count"`` gives the number of extra ``from`` cells within ``r`` of each ``to`` cell
+    instead; it also reflects how many ``from`` cells surround a ``to`` cell (depth of infiltration), but it grows
+    with how densely the ``from`` cells are packed. Images are combined within patients (``subject``) and patients
+    within conditions by a frailty GEE, and the difference is tested with a CR2 variance on Satterthwaite degrees of
+    freedom, with **patients as the units**. The difference is adjusted for any ``covariates`` and, with
+    ``adjust_abundance=True``, for the log share of the ``from`` type in each image; the unadjusted test is then
+    reported alongside (``unadjusted_*`` columns). When nearly every cell has a ``from`` cell within ``r`` (q close to
+    1), an image carries little information on the allocation scale, and a smaller ``r`` is more informative.
 
     ``from`` is spelled ``from_`` because ``from`` is a Python keyword (``**{"from": ...}`` also works).
 
@@ -72,11 +78,16 @@ def spicy(
         Cell types to test (all ordered pairs by default).
     method
         "cell" (spicyR Cell). The image-level method of spicyR is not yet available in Python.
+    effect
+        "allocation" (default): the extra fraction of ``to`` cells with at least one ``from`` cell within ``r``;
+        "count": the number of extra ``from`` cells within ``r`` of each ``to`` cell. With ``k``, "within ``r``"
+        means among the cell's ``k`` nearest neighbours.
     k
         Use the ``k`` nearest neighbours instead of a radius.
     adjust_abundance
-        Adjust the test for the log share of the ``from`` type in each image (default ``True``). Its effect is
-        reported as ``abundance_effect``. ``False`` gives the test without it.
+        Adjust the test for the log share of the ``from`` type in each image (default ``False``). Its effect is
+        reported as ``abundance_effect``. It does not separate more ``from`` cells from more densely packed ones,
+        and it removes real effects when the share tracks the condition.
     variance
         "cr2" (default) or "hartung_knapp" (for very few patients).
     survival
@@ -96,6 +107,8 @@ def spicy(
         raise ValueError("combine must be 'maxT' or 'cauchy'.")
     if variance not in ("cr2", "hartung_knapp"):
         raise ValueError("variance must be 'cr2' or 'hartung_knapp'.")
+    if effect not in ("allocation", "count"):
+        raise ValueError("effect must be 'allocation' or 'count'.")
     if r is None and k is None:
         r = 50
     if k is not None:
@@ -118,8 +131,9 @@ def spicy(
     ]
     if bad:
         raise ValueError(f"cell type not found: {bad}")
-    # from -> to: extra `from` cells around each `to` cell, beyond the `to` cells being a random subset of the cells
-    # that are not `from` cells. This is the core's own (counted, centre) order, so pairs pass through as given.
+    # from -> to: are `to` cells placed next to `from` cells (allocation: the extra fraction of `to` cells with a `from`
+    # cell within r; count: extra `from` cells within r of each `to` cell), beyond the `to` cells being a random subset
+    # of the cells that are not `from` cells. This is the core's own (counted, centre) order, so pairs pass through.
     pairs = list(_cell.enumerate_pairs(from_, to, types))
     if is_surv:
         df[".time"] = df[condition].astype(float)
@@ -140,12 +154,18 @@ def spicy(
     if len(radii) > 1 and not is_surv and len(ctx.levels) > 2:
         raise ValueError("several radii are supported for two conditions; give one `r`.")
     if is_surv:
-        res = _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, adjust_abundance)
+        res = _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, adjust_abundance, effect)
     else:
         per_r = []
         for rr in radii:
             g = _cell.cell_graph(
-                ctx, pairs, r=None if np.isnan(rr) else rr, k=k, label_clustering=label_clustering, n_threads=cores
+                ctx,
+                pairs,
+                r=None if np.isnan(rr) else rr,
+                k=k,
+                label_clustering=label_clustering,
+                n_threads=cores,
+                effect=effect,
             )
             per_r.append(
                 [
@@ -154,7 +174,7 @@ def spicy(
                 ]
             )
         res = _combine(per_r, radii, ctx, adjust_abundance or covariates is not None, combine)
-    return _results(res, ctx, pheno, condition, subject, is_surv, radii, k)
+    return _results(res, ctx, pheno, condition, subject, is_surv, radii, k, effect)
 
 
 def _model_matrix(pheno, covariates):
@@ -231,7 +251,7 @@ def _combine(per_r, radii, ctx, adjusted, combine):
     return {"table": _cell.order_columns(tab), "fits": per_r[mid], "radius_table": long}
 
 
-def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, adjust):
+def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, adjust, effect="allocation"):
     unit_first = np.array([int(np.argmax(ctx.image_unit == u)) for u in range(len(ctx.unit_labels))])
     time = pheno[".time"].to_numpy(float)[unit_first]
     event = pheno[".event"].to_numpy(float)[unit_first]
@@ -250,7 +270,13 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
     M[ok_u] = null["martingale"]
     rr = radii[0]
     g = _cell.cell_graph(
-        ctx, pairs, r=None if np.isnan(rr) else rr, k=k, label_clustering=label_clustering, n_threads=cores
+        ctx,
+        pairs,
+        r=None if np.isnan(rr) else rr,
+        k=k,
+        label_clustering=label_clustering,
+        n_threads=cores,
+        effect=effect,
     )
     fits, rows = [], []
     ev = np.where(np.isfinite(event), event, 0).astype(np.int32)
@@ -293,7 +319,7 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
     return {"table": tab, "fits": fits}
 
 
-def _results(res, ctx, pheno, condition, subject, survival, radii, k) -> SpicyResults:
+def _results(res, ctx, pheno, condition, subject, survival, radii, k, effect="count") -> SpicyResults:
     tab = res["table"]
     if tab is None:
         raise ValueError("no pair could be tested (each condition needs at least two patients with both cell types).")
@@ -311,4 +337,5 @@ def _results(res, ctx, pheno, condition, subject, survival, radii, k) -> SpicyRe
         image_weights=w,
         r=None if k is not None else radii,
         k=k,
+        effect=effect,
     )

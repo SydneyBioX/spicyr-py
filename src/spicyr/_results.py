@@ -25,7 +25,9 @@ class SpicyResults:
     """Results of :func:`spicyr.spicy`.
 
     ``cell_results`` is the full table, one row per pair (and per level when there are more than two
-    conditions): the excess in the reference condition (``excess_ref``) and the comparison condition, the
+    conditions): the effect (``effect``: "allocation", the extra fraction of ``to`` cells with a ``from`` cell within
+    ``r``, or "count", the extra ``from`` cells per ``to`` cell) in the reference condition (``excess_ref``) and the
+    comparison condition, the
     difference, its standard error, Satterthwaite df, p-value and BH-adjusted p-value, the frailty variance
     ``tau2``, what the test was adjusted for (``adjusted_for``), the effect and p-value of each adjustment
     (``abundance_effect``, ``<covariate>_effect``, ...) and the unadjusted test (``unadjusted_*``).
@@ -45,6 +47,7 @@ class SpicyResults:
     r: list | None = None
     k: int | None = None
     method: str = "cell"
+    effect: str = "allocation"
 
     # --- spicyR-style matrices -----------------------------------------------------------------------
     def _wide(self, col):
@@ -145,7 +148,10 @@ class SpicyResults:
         d["relative"] = d["weight"] / d.groupby("condition")["weight"].transform("mean")
         groups = [g for g in (self.levels or []) if (d["condition"] == g).any()]
         sized = bool(np.isfinite(d["relative"]).any())
-        ylabel, title = f"Extra {from_} per {to}<br>(beyond chance)", f"{from_} around {to}"
+        if self.effect == "allocation":
+            ylabel, title = f"Extra fraction of {to} next to {from_}<br>(beyond chance)", f"{to} next to {from_}"
+        else:
+            ylabel, title = f"Extra {from_} per {to}<br>(beyond chance)", f"{from_} around {to}"
         if interactive:
             return self._box_plotly(d, groups, sized, ylabel, title)
         import matplotlib.pyplot as plt
@@ -320,7 +326,7 @@ class SpicyResults:
         ax.set_xticks(range(len(xs)), xs, rotation=45, ha="right")
         ax.set_yticks(range(len(ys)), ys)
         ax.set_xlabel("to (centre)")
-        ax.set_ylabel("from (counted)")
+        ax.set_ylabel("from (neighbour)")
         for side in ("top", "right"):
             ax.spines[side].set_visible(False)
 

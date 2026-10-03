@@ -4,11 +4,41 @@
     "subject": "patient",
     "r": 30
   },
-  "unadjusted": {
+  "adjusted": {
     "condition": "condition",
     "subject": "patient",
     "r": 30,
-    "adjustAbundance": false
+    "adjustAbundance": true
+  },
+  "count": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "effect": "count"
+  },
+  "count_adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "effect": "count",
+    "adjustAbundance": true
+  },
+  "knn_count": {
+    "condition": "condition",
+    "subject": "patient",
+    "k": 10,
+    "from": ["tumour", "macro"],
+    "to": ["T", "B"],
+    "effect": "count"
+  },
+  "survival_count": {
+    "condition": "os",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T"],
+    "to": ["T", "B", "macro"],
+    "covariates": "age",
+    "effect": "count"
   },
   "hk_no_clustering": {
     "condition": "condition",
