@@ -40,8 +40,8 @@ whether `to` cells are placed near `from` cells more than other cells are: the e
 ## What you get
 
 - A table with one row per pair of cell types: the extra fraction of `to` cells next to `from` cells in each
-  group, the difference, a p-value and an FDR-adjusted p-value. The effect does not change simply because one group
-  has more `from` cells, or more tightly packed ones.
+  group, the difference, a p-value and an FDR-adjusted p-value. Each `to` cell counts once, however many `from`
+  cells are beside it, so more numerous or more tightly packed `from` cells do not inflate the effect.
 - A plot of every pair at once, the per-image values behind any pair (interactive, to find the images worth
   looking at), and a plot of any image.
 - The same test with covariates, several radii, more than two groups, or a survival outcome.
@@ -75,5 +75,5 @@ Questions and bug reports: [GitHub issues](https://github.com/SydneyBioX/spicyr-
 [ellis.patrick@sydney.edu.au](mailto:ellis.patrick@sydney.edu.au). For developers:
 [CONTRIBUTING](CONTRIBUTING.md).
 
-spicyr 1.99.0 is a development version. Authors: Ellis Patrick, Sadiq Dohadwalla, Elijah Willie and Nicolas Canete.
+spicyr 1.99.5 is a development version. Authors: Ellis Patrick, Sadiq Dohadwalla, Elijah Willie and Nicolas Canete.
 Licence: GPL (>= 2).

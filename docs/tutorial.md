@@ -24,9 +24,11 @@ are. For each `to` cell, spicyr checks whether there is a `from` cell within a r
 `to` cells that have one with what we would expect if the `to` cells were a random choice among the cells of the
 same image that are not `from` cells. The effect is the **extra fraction of `to` cells placed next to `from`
 cells**, beyond chance: 0.2 means as if a fifth of the `to` cells had been moved next to `from` cells and the rest
-left where chance would put them. It does not change simply because there are more `from` cells, or because they are
-packed more tightly. Because the comparison uses only the cells that are actually there, empty regions such as holes
-or air spaces, and uneven cell density, do not by themselves create a signal. spicyr then compares the effect
+left where chance would put them. Each `to` cell counts once, however many `from` cells are beside it, so more
+numerous or more tightly packed `from` cells do not inflate the effect. Because the comparison uses only the cells
+that are actually there, empty regions such as holes or air spaces, and uneven cell density, do not by themselves
+create a signal (artefacts that affect one cell type more than others are not removed). spicyr then compares the
+effect
 between groups of patients, treating patients, not images or cells, as the units of the test.
 
 ```{figure} _static/spicyR_overview.png
@@ -247,7 +249,7 @@ its two tumour cells both happen to sit in a cluster of T cells.
 :::{tip}
 Point size matters. The right-hand image sits at the top of the box plot, but its weight is close to zero: an
 effect estimated from two cells says little. Weights also level off. Once an image has a few dozen `to` cells,
-more cells add little, because patients differ from one another more than repeated counts within a patient do.
+more cells add little, because the differences between patients outweigh the noise within an image.
 The weights are in `res.image_weights`.
 :::
 
@@ -264,7 +266,8 @@ tab.sort_values("p_value")[["to", "excess_ref", "excess_comp", "p_adj"]].head(6)
 ```
 
 In ER+ tumours the effect for proliferating `HR+ CK7- Ki67+` cells is 0.60, against 0.07 in ER− tumours, while
-fibroblasts and T cells are placed away from `HR+ CK7-` cells. These are real differences in arrangement, but they
+fibroblasts and T cells are placed away from `HR+ CK7-` cells (where `HR+ CK7-` cells are rare, as in ER− cores, an
+effect cannot fall far below zero). These are real differences in arrangement, but they
 describe the structure of the tissue (tumour cells sit with tumour cells) more than an interaction between
 particular cell types.
 
@@ -286,16 +289,17 @@ res_count.cell_results.loc[[pair], ["excess_ref", "excess_comp", "excess_differe
 ```
 
 In ER+ tumours each proliferating tumour cell has about 0.16 extra T cells within 25 µm, against 0.01 in ER−
-tumours. The count also reflects how deeply T cells infiltrate, but it grows with how tightly the `from` cells are
-packed: if T cells form denser clusters in one group, each tumour cell next to a cluster counts more T cells, even
-when the same fraction of tumour cells sits next to T cells. The default effect does not change in that case.
+tumours. The count also reflects how many T cells surround each tumour cell, but it grows with how tightly the
+`from` cells are packed: if T cells form denser clusters in one group, each tumour cell next to a cluster counts more
+T cells. The default effect counts each tumour cell once, however many T cells are beside it, so denser clusters do
+not inflate it.
 
 :::{note}
 Use the default when your question is whether `to` cells are placed next to `from` cells. Use `effect="count"` when
 the number of `from` cells around each `to` cell is the question, keeping in mind that it also rises when the `from`
 cells are packed more tightly. `adjust_abundance=True` adds the log share of the `from` type in each image to the
-model; it cannot tell more `from` cells from more tightly packed ones, and when that share differs strongly between
-groups, as for `HR+ CK7-` here, it leaves little power.
+model, so that groups are compared at the same abundance; it does not account for how tightly the `from` cells are
+packed, and when that share differs strongly between groups, as for `HR+ CK7-` here, it leaves little power.
 :::
 
 ## Patients with several images
@@ -359,7 +363,8 @@ res_r.cell_results.loc[[pair, "B cells__HR- Ki67+"], ["r", "excess_difference", 
 
 :::{tip}
 The effect depends on the radius: at a larger radius more cells have a `from` cell nearby by chance, and the effect
-describes placement at that scale. Compare p-values across radii rather than the size of the effect. The effect at
+describes placement at that scale. Where most cells have a `from` cell nearby by chance, there is little room for
+an effect and it is noisy. Compare p-values across radii rather than the size of the effect. The effect at
 the chosen radius is a little optimistic, because that radius was picked for its strength. This combined test is new, and its calibration is still being checked.
 :::
 
@@ -453,8 +458,11 @@ permutations. The effect of an image is
 $$\delta = \frac{O - \mathrm{E}_{\mathrm{RL}}(O)}{n - \mathrm{E}_{\mathrm{RL}}(O)},$$
 
 where $\mathrm{E}_{\mathrm{RL}}(O)$ is that expectation under random labelling. If a fraction $f$ of the `to`
-cells were placed next to `from` cells and the rest at random, $\delta$ would estimate $f$. With `effect="count"`,
-$O$ is instead the number of `from` cells within $r$ of the `to` cells, and the denominator is $n$.
+cells were placed next to `from` cells and the rest at random, $\delta$ would estimate $f$. Negative values mean
+fewer `to` cells next to `from` cells than chance; they are not a fraction, and the lowest possible value,
+$-\mathrm{E}_{\mathrm{RL}}(O)/(n - \mathrm{E}_{\mathrm{RL}}(O))$, is far below zero only where `from` cells are
+common. With `effect="count"`, $O$ is instead the sum, over the `to` cells, of the number of `from` cells within $r$
+of each, and the denominator is $n$.
 
 Images from the same patient are combined, giving more weight to more informative images (usually those with more
 `to` cells). Each patient has its own true effect, which varies around its group's mean by an amount estimated

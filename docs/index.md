@@ -12,7 +12,7 @@ example imaging mass cytometry, CODEX, MIBI, Xenium or CosMx), not spot-based da
 
 ```{image} _static/spicyR_overview.png
 :width: 100%
-:alt: Left, a tumour cell with a 25 µm circle and the T cells inside it. Right, box plots of the extra T cells per tumour cell, one point per patient, higher in ER-positive than ER-negative tumours.
+:alt: Left, tumour cells marked by whether a T cell lies within 25 µm, with the circle drawn around two of them. Right, box plots of the extra fraction of tumour cells next to T cells, one point per patient, higher in ER-positive than ER-negative tumours.
 ```
 
 ```bash
