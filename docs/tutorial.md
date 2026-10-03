@@ -365,7 +365,7 @@ res_r.cell_results.loc[[pair, "B cells__HR- Ki67+"], ["r", "excess_difference", 
 The effect depends on the radius: at a larger radius more cells have a `from` cell nearby by chance, and the effect
 describes placement at that scale. Where most cells have a `from` cell nearby by chance, there is little room for
 an effect and it is noisy. Compare p-values across radii rather than the size of the effect. The effect at
-the chosen radius is a little optimistic, because that radius was picked for its strength. This combined test is new, and its calibration is still being checked.
+the chosen radius is a little optimistic, because that radius was picked for its strength.
 :::
 
 ```{code-cell} ipython3
