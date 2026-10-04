@@ -49,6 +49,7 @@ class SpicyResults:
     k: int | None = None
     method: str = "cell"
     effect: str = "allocation"
+    variance: str | None = None
 
     # --- spicyR-style matrices -----------------------------------------------------------------------
     def _wide(self, col):

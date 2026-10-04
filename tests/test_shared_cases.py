@@ -50,3 +50,18 @@ def test_case_matches_r(name):
         m = er.merge(gr, on=key, suffixes=("_r", "_py"))
         assert len(m) == len(er)
         np.testing.assert_allclose(m["p_value_py"], m["p_value_r"], rtol=1e-7, atol=1e-10)
+
+
+def test_variance_auto():
+    """variance="auto": Hartung-Knapp when a condition has at most 5 patients, CR2 otherwise."""
+    pts = CELLS[["patient", "condition"]].drop_duplicates()
+    res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=20, from_="tumour", to="T")
+    assert res.variance == ("hartung_knapp" if pts["condition"].value_counts().min() <= 5 else "cr2")
+    keep = pts.groupby("condition")["patient"].apply(lambda s: list(s)[:4]).explode()
+    small = CELLS[CELLS["patient"].isin(keep)]
+    with pytest.warns(UserWarning, match="Hartung-Knapp"):
+        ra = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T")
+    rh = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T",
+                      variance="hartung_knapp")
+    assert ra.variance == "hartung_knapp"
+    np.testing.assert_allclose(ra.cell_results["p_value"], rh.cell_results["p_value"])
