@@ -53,14 +53,18 @@ def test_case_matches_r(name):
 
 
 def test_variance_auto():
-    """variance="auto": Hartung-Knapp when a condition has at most 5 patients, CR2 otherwise."""
+    """CR2 by default; variance="auto": Hartung-Knapp when a condition has at most 5 patients, CR2 otherwise."""
     pts = CELLS[["patient", "condition"]].drop_duplicates()
-    res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=20, from_="tumour", to="T")
-    assert res.variance == ("hartung_knapp" if pts["condition"].value_counts().min() <= 5 else "cr2")
     keep = pts.groupby("condition")["patient"].apply(lambda s: list(s)[:4]).explode()
     small = CELLS[CELLS["patient"].isin(keep)]
+    rd = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T")
+    assert rd.variance == "cr2"
+    res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=20, from_="tumour", to="T",
+                       variance="auto")
+    assert res.variance == ("hartung_knapp" if pts["condition"].value_counts().min() <= 5 else "cr2")
     with pytest.warns(UserWarning, match="Hartung-Knapp"):
-        ra = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T")
+        ra = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T",
+                          variance="auto")
     rh = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T",
                       variance="hartung_knapp")
     assert ra.variance == "hartung_knapp"

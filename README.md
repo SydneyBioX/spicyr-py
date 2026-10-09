@@ -75,5 +75,5 @@ Questions and bug reports: [GitHub issues](https://github.com/SydneyBioX/spicyr-
 [ellis.patrick@sydney.edu.au](mailto:ellis.patrick@sydney.edu.au). For developers:
 [CONTRIBUTING](CONTRIBUTING.md).
 
-spicyr 1.99.6 is a development version. Authors: Ellis Patrick, Sadiq Dohadwalla, Elijah Willie and Nicolas Canete.
+spicyr 1.99.7 is a development version. Authors: Ellis Patrick, Sadiq Dohadwalla, Elijah Willie and Nicolas Canete.
 Licence: GPL (>= 2).

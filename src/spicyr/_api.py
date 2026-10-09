@@ -31,7 +31,7 @@ def spicy(
     k=None,
     combine="maxT",
     adjust_abundance=False,
-    variance="auto",
+    variance="cr2",
     frailty=True,
     label_clustering=True,
     ref=None,
@@ -96,9 +96,9 @@ def spicy(
         reported as ``abundance_effect``. It does not separate more ``from`` cells from more densely packed ones,
         and it removes real effects when the share tracks the condition.
     variance
-        "auto" (default: "hartung_knapp" when a condition has at most 5 patients, "cr2" otherwise), "cr2" (CR2 on
-        Satterthwaite df) or "hartung_knapp" (for very few patients: the model-based variance floored at CR2, on
-        m - 2 df). The variance used is in ``.variance`` of the result.
+        "cr2" (default: CR2 on Satterthwaite df), "hartung_knapp" (for very few patients: the model-based variance
+        floored at CR2, on m - 2 df) or "auto" ("hartung_knapp" when a condition has at most 5 patients, "cr2"
+        otherwise). The variance used is in ``.variance`` of the result.
     survival
         A survival outcome: ``(time_column, event_column)``, one value per patient (the R package's
         ``Surv(time, event)``). Leave ``condition`` empty. (Older form: ``condition=time_column,
@@ -114,8 +114,8 @@ def spicy(
         )
     if combine not in ("maxT", "cauchy"):
         raise ValueError("combine must be 'maxT' or 'cauchy'.")
-    if variance not in ("auto", "cr2", "hartung_knapp"):
-        raise ValueError("variance must be 'auto', 'cr2' or 'hartung_knapp'.")
+    if variance not in ("cr2", "hartung_knapp", "auto"):
+        raise ValueError("variance must be 'cr2', 'hartung_knapp' or 'auto'.")
     if effect not in ("allocation", "count"):
         raise ValueError("effect must be 'allocation' or 'count'.")
     if r is None and k is None:
