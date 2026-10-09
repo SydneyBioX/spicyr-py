@@ -23,6 +23,13 @@ The attributes of a results object:
 | `image_weights` | the weight of every image in the test of every pair: its share of its group's information (the point sizes of `box_plot()`) |
 | `levels`, `image_ids`, `condition`, `subject`, `r`, `k`, `effect` | the groups, images and settings of the analysis (`effect`: "allocation" or "count") |
 
+## Proportions
+
+```{eval-rst}
+.. autofunction:: spicyr.get_prop
+.. autofunction:: spicyr.col_test
+```
+
 ## Plotting an image
 
 ```{eval-rst}

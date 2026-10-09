@@ -1,0 +1,7 @@
+"","coef","se.coef","pval","adjPval","cluster"
+"stroma",-68,48,0.16,0.7,"stroma"
+"tumour",29,25,0.24,0.7,"tumour"
+"rare",-76,82,0.35,0.7,"rare"
+"T",-12,22,0.6,0.82,"T"
+"macro",12,28,0.68,0.82,"macro"
+"B",4.8,25,0.85,0.85,"B"

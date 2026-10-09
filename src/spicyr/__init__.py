@@ -5,9 +5,10 @@
 
 from . import datasets
 from ._api import spicy
+from ._coltest import col_test, get_prop
 from ._input import format_data
 from ._plots import plot_image
 from ._results import SpicyResults
 
-__version__ = "1.99.8"
-__all__ = ["spicy", "format_data", "plot_image", "SpicyResults", "datasets", "__version__"]
+__version__ = "1.99.9"
+__all__ = ["spicy", "col_test", "get_prop", "format_data", "plot_image", "SpicyResults", "datasets", "__version__"]

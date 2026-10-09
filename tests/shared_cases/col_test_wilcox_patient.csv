@@ -1,0 +1,7 @@
+"","tval.W","pval","adjPval","cluster"
+"rare",7,0.026,0.16,"rare"
+"stroma",15,0.26,0.64,"stroma"
+"B",32,0.38,0.64,"B"
+"T",31,0.46,0.64,"T"
+"tumour",19,0.53,0.64,"tumour"
+"macro",27,0.8,0.8,"macro"

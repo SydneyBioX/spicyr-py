@@ -45,6 +45,9 @@ whether `to` cells are placed near `from` cells more than other cells are: the e
 - A plot of every pair at once, the per-image values behind any pair (interactive, to find the images worth
   looking at), and a plot of any image.
 - The same test with covariates, several radii, more than two groups, or a survival outcome.
+- `get_prop()` and `col_test()` for the proportion of each cell type (or region, e.g. from
+  [lisaclust](https://github.com/SydneyBioX/lisaclust-py)) in each image or patient, compared between groups or
+  related to survival.
 
 ## Installation
 
@@ -75,5 +78,5 @@ Questions and bug reports: [GitHub issues](https://github.com/SydneyBioX/spicyr-
 [ellis.patrick@sydney.edu.au](mailto:ellis.patrick@sydney.edu.au). For developers:
 [CONTRIBUTING](CONTRIBUTING.md).
 
-spicyr 1.99.8 is a development version. Authors: Ellis Patrick, Sadiq Dohadwalla, Elijah Willie and Nicolas Canete.
+spicyr 1.99.9 is a development version. Authors: Ellis Patrick, Sadiq Dohadwalla, Elijah Willie and Nicolas Canete.
 Licence: GPL (>= 2).
