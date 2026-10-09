@@ -33,7 +33,7 @@ def spicy(
     adjust_abundance=False,
     variance="cr2",
     frailty=True,
-    label_clustering=True,
+    label_clustering=False,
     ref=None,
     cores=1,
     survival=None,
@@ -236,7 +236,9 @@ def _combine(per_r, radii, ctx, adjusted, combine):
         ok = [i for i, z in enumerate(tests) if z is not None]
         if not ok:
             return None
-        tt = np.array([tests[i]["difference"] / tests[i]["se"] for i in ok])
+        # as R: a zero standard error gives an infinite (or NaN) t, not an error
+        with np.errstate(divide="ignore", invalid="ignore"):
+            tt = np.array([tests[i]["difference"] for i in ok], float) / np.array([tests[i]["se"] for i in ok], float)
         df_ = np.array([tests[i]["df"] for i in ok])
         pv = np.array([tests[i]["p"] for i in ok])
         if combine == "maxT":
@@ -313,24 +315,24 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
         if s["ok"]:
             rows.append(
                 _cell.add_side(
-                {
-                    "from": f,
-                    "to": t,
-                    "score_coefficient": s["score_coef"],
-                    "score_se": s["score_se"],
-                    "score_df": s["score_df"],
-                    "p_value": s["score_p"],
-                    "hazard_ratio_sd": s["hr_sd"],
-                    "log_hr_sd": s["log_hr_sd"],
-                    "log_hr_se": s["hr_se"],
-                    "hr_p_value": s["hr_p"],
-                    "log_hr_per_unit": s["log_hr_unit"],
-                    "tau2": s["tau2"],
-                    "adjusted_for": "+".join(parts) or "none",
-                    "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
-                    "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan,
-                },
-                fits[-1],
+                    {
+                        "from": f,
+                        "to": t,
+                        "score_coefficient": s["score_coef"],
+                        "score_se": s["score_se"],
+                        "score_df": s["score_df"],
+                        "p_value": s["score_p"],
+                        "hazard_ratio_sd": s["hr_sd"],
+                        "log_hr_sd": s["log_hr_sd"],
+                        "log_hr_se": s["hr_se"],
+                        "hr_p_value": s["hr_p"],
+                        "log_hr_per_unit": s["log_hr_unit"],
+                        "tau2": s["tau2"],
+                        "adjusted_for": "+".join(parts) or "none",
+                        "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
+                        "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan,
+                    },
+                    fits[-1],
                 )
             )
     tab = pd.DataFrame(rows) if rows else None

@@ -59,13 +59,14 @@ def test_variance_auto():
     small = CELLS[CELLS["patient"].isin(keep)]
     rd = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T")
     assert rd.variance == "cr2"
-    res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=20, from_="tumour", to="T",
-                       variance="auto")
+    res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=20, from_="tumour", to="T", variance="auto")
     assert res.variance == ("hartung_knapp" if pts["condition"].value_counts().min() <= 5 else "cr2")
     with pytest.warns(UserWarning, match="Hartung-Knapp"):
-        ra = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T",
-                          variance="auto")
-    rh = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T",
-                      variance="hartung_knapp")
+        ra = spicyr.spicy(
+            small, condition="condition", subject="patient", r=20, from_="tumour", to="T", variance="auto"
+        )
+    rh = spicyr.spicy(
+        small, condition="condition", subject="patient", r=20, from_="tumour", to="T", variance="hartung_knapp"
+    )
     assert ra.variance == "hartung_knapp"
     np.testing.assert_allclose(ra.cell_results["p_value"], rh.cell_results["p_value"])

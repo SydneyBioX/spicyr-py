@@ -174,11 +174,21 @@ def cell_graph(
         h = 2 * float(r)
     allocation = effect == "allocation"
     if allocation:
-        g = Graph(knn, effect, np.zeros(0), any=ctx.data.pair_neighbour_any_totals(knn),
-                  self_expected=ctx.data.self_any_expected(knn))
+        g = Graph(
+            knn,
+            effect,
+            np.zeros(0),
+            any=ctx.data.pair_neighbour_any_totals(knn),
+            self_expected=ctx.data.self_any_expected(knn),
+        )
     else:
-        g = Graph(knn, effect, np.zeros(0), totals=ctx.data.pair_neighbour_totals(knn),
-                  sq=ctx.data.pair_neighbour_out_sq_totals(knn))
+        g = Graph(
+            knn,
+            effect,
+            np.zeros(0),
+            totals=ctx.data.pair_neighbour_totals(knn),
+            sq=ctx.data.pair_neighbour_out_sq_totals(knn),
+        )
     if label_clustering:
         # psi of a `to` type is the median over every counted type (not only the requested pairs), so a pair's result
         # does not depend on which other pairs were asked for
