@@ -34,6 +34,7 @@ def spicy(
     variance="cr2",
     frailty=True,
     label_clustering=False,
+    image_heterogeneity=True,
     ref=None,
     cores=1,
     survival=None,
@@ -99,6 +100,12 @@ def spicy(
         "cr2" (default: CR2 on Satterthwaite df), "hartung_knapp" (for very few patients: the model-based variance
         floored at CR2, on m - 2 df) or "auto" ("hartung_knapp" when a condition has at most 5 patients, "cr2"
         otherwise). The variance used is in ``.variance`` of the result.
+    image_heterogeneity
+        Allow the effect to vary between a patient's images beyond their sampling variance (default ``True``).
+        Each image is weighted by 1 / (its sampling variance + the between-image variance), so an image with many
+        cells cannot outweigh the patient's other images. The between-image variance is estimated from the spread
+        within patients (DerSimonian-Laird) and reported as ``tau2_image``. With one image per patient it has no
+        effect.
     survival
         A survival outcome: ``(time_column, event_column)``, one value per patient (the R package's
         ``Surv(time, event)``). Leave ``condition`` empty. (Older form: ``condition=time_column,
@@ -173,7 +180,19 @@ def spicy(
     if len(radii) > 1 and not is_surv and len(ctx.levels) > 2:
         raise ValueError("several radii are supported for two conditions; give one `r`.")
     if is_surv:
-        res = _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, adjust_abundance, effect)
+        res = _survival(
+            ctx,
+            pairs,
+            radii,
+            k,
+            pheno,
+            covariates,
+            label_clustering,
+            cores,
+            adjust_abundance,
+            effect,
+            image_heterogeneity,
+        )
     else:
         per_r = []
         for rr in radii:
@@ -186,6 +205,7 @@ def spicy(
                 n_threads=cores,
                 effect=effect,
             )
+            g.image_heterogeneity = image_heterogeneity
             per_r.append(
                 [
                     _cell.cell_pair_test(ctx, g, p[0], p[1], frailty, variance, adjust_abundance, Z_extra, extra_names)
@@ -274,7 +294,19 @@ def _combine(per_r, radii, ctx, adjusted, combine):
     return {"table": _cell.order_columns(tab), "fits": per_r[mid], "radius_table": long}
 
 
-def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, adjust, effect="allocation"):
+def _survival(
+    ctx,
+    pairs,
+    radii,
+    k,
+    pheno,
+    covariates,
+    label_clustering,
+    cores,
+    adjust,
+    effect="allocation",
+    image_heterogeneity=True,
+):
     unit_first = np.array([int(np.argmax(ctx.image_unit == u)) for u in range(len(ctx.unit_labels))])
     time = pheno[".time"].to_numpy(float)[unit_first]
     event = pheno[".event"].to_numpy(float)[unit_first]
@@ -301,6 +333,7 @@ def _survival(ctx, pairs, radii, k, pheno, covariates, label_clustering, cores, 
         n_threads=cores,
         effect=effect,
     )
+    g.image_heterogeneity = image_heterogeneity
     fits, rows = [], []
     ev = np.where(np.isfinite(event), event, 0).astype(np.int32)
     for f, t in pairs:

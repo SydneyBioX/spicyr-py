@@ -152,6 +152,7 @@ class Graph:
     sq: np.ndarray | None = None
     any: np.ndarray | None = None
     self_expected: np.ndarray | None = None
+    image_heterogeneity: bool = False
 
 
 def cell_graph(
@@ -209,9 +210,19 @@ def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     rows["unit"] = ctx.image_unit[rows["img"]].astype(np.int32)
     if ctx.image_group is not None:
         rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)
+    side = None
     if g.effect == "allocation":
         # the pair's side, chosen in the core from all images (attraction scales by 1 - q, avoidance by q)
-        rows["side"] = "avoid" if float(np.sum(rows["O"] - rows["E"])) < 0 else "attract"
+        side = "avoid" if float(np.sum(rows["O"] - rows["E"])) < 0 else "attract"
+    # images within a patient: each row becomes its effect (O - E) / n with variance v / n^2 + tau2_image
+    if g.image_heterogeneity and len(rows["O"]):
+        h = _core.image_heterogeneity_rows(rows, rows["unit"])
+        for key in ("unit", "group"):
+            if key in rows:
+                h[key] = rows[key]
+        rows = h
+    if side is not None:
+        rows["side"] = side
     return rows
 
 
@@ -220,10 +231,12 @@ def _subset_rows(rows, keep) -> dict:
 
 
 def add_side(row: dict, o: dict) -> dict:
-    """Add the allocation side of a fit to its table row."""
+    """Add the allocation side and the between-image variance of a fit to its table row."""
     rows = o.get("rows")
     if rows is not None and "side" in rows:
         row["side"] = rows["side"]
+    if rows is not None and "tau2_image" in rows:
+        row["tau2_image"] = rows["tau2_image"]
     return row
 
 
@@ -403,6 +416,7 @@ FIRST_COLUMNS = [
     "p_adj",
     "p_value_best_radius",
     "tau2",
+    "tau2_image",
     "adjusted_for",
 ]
 

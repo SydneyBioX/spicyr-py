@@ -99,6 +99,12 @@ PYBIND11_MODULE(_core, m) {
                                          n_images, from, to, vec<double>(psi)));
   });
 
+  m.def("image_heterogeneity_rows", [](const py::dict& rows, const IntArray& unit) {
+    double tau2 = 0;
+    py::dict d = rows_to(image_heterogeneity_rows(rows_from(rows), vec<int>(unit), &tau2));
+    d["tau2_image"] = tau2;
+    return d;
+  });
   m.def("label_clustering_factor", [](const Dataset& d, const IntArray& from, const IntArray& to, const DoubleArray& counts,
                                       int n_types, bool knn, double h, bool allocation) {
     int n_images = static_cast<int>(counts.size() / n_types);
