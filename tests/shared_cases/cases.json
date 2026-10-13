@@ -40,12 +40,11 @@
     "covariates": "age",
     "effect": "count"
   },
-  "hk_no_clustering": {
+  "hartung_knapp": {
     "condition": "condition",
     "subject": "patient",
     "r": 30,
-    "variance": "hartung_knapp",
-    "labelClustering": false
+    "variance": "hartung_knapp"
   },
   "images_as_units": {
     "condition": "condition",

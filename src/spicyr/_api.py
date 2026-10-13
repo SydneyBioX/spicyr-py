@@ -5,8 +5,6 @@ The mirror of spicyR's ``R/spicy_main.R``.
 
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 import pandas as pd
 
@@ -32,9 +30,6 @@ def spicy(
     combine="maxT",
     adjust_abundance=False,
     variance="cr2",
-    frailty=True,
-    label_clustering=False,
-    image_heterogeneity=True,
     ref=None,
     cores=1,
     survival=None,
@@ -58,8 +53,10 @@ def spicy(
     ``effect="count"`` gives the number of extra ``from`` cells within ``r`` of each ``to`` cell
     instead; it also reflects how many ``from`` cells surround a ``to`` cell (depth of infiltration), but it grows
     with how densely the ``from`` cells are packed. Images are combined within patients (``subject``) and patients
-    within conditions by a frailty GEE, and the difference is tested with a CR2 variance on Satterthwaite degrees of
-    freedom (Hartung-Knapp on m - 2 df when a condition has at most 5 patients), with **patients as the units**. The difference is adjusted for any ``covariates`` and, with
+    within conditions by a frailty GEE with a second random effect for the images of a patient (each image is
+    weighted by 1 / (its sampling variance + the between-image variance), so one large image cannot outweigh the
+    patient's other images), and the difference is tested with a CR2 variance on Satterthwaite degrees of freedom,
+    with **patients as the units**. The difference is adjusted for any ``covariates`` and, with
     ``adjust_abundance=True``, for the log share of the ``from`` type in each image; the unadjusted test is then
     reported alongside (``unadjusted_*`` columns). When nearly every cell has a ``from`` cell within ``r`` (q close to
     1), there is little room for attraction and an attracting pair's images carry little information; a smaller ``r``
@@ -97,15 +94,9 @@ def spicy(
         reported as ``abundance_effect``. It does not separate more ``from`` cells from more densely packed ones,
         and it removes real effects when the share tracks the condition.
     variance
-        "cr2" (default: CR2 on Satterthwaite df), "hartung_knapp" (for very few patients: the model-based variance
-        floored at CR2, on m - 2 df) or "auto" ("hartung_knapp" when a condition has at most 5 patients, "cr2"
-        otherwise). The variance used is in ``.variance`` of the result.
-    image_heterogeneity
-        Allow the effect to vary between a patient's images beyond their sampling variance (default ``True``).
-        Each image is weighted by 1 / (its sampling variance + the between-image variance), so an image with many
-        cells cannot outweigh the patient's other images. The between-image variance is estimated from the spread
-        within patients (DerSimonian-Laird) and reported as ``tau2_image``. With one image per patient it has no
-        effect.
+        "cr2" (default: CR2 on Satterthwaite df) or "hartung_knapp" (the model-based variance, scaled by the Pearson
+        statistic when that exceeds its df and never below CR2, on m - 2 df). The variance used is in ``.variance``
+        of the result.
     survival
         A survival outcome: ``(time_column, event_column)``, one value per patient (the R package's
         ``Surv(time, event)``). Leave ``condition`` empty. (Older form: ``condition=time_column,
@@ -113,6 +104,12 @@ def spicy(
     """
     if "from" in kwargs:
         from_ = kwargs.pop("from")
+    gone = [a for a in ("frailty", "label_clustering", "image_heterogeneity") if a in kwargs]
+    if gone:
+        raise TypeError(
+            f"`{gone[0]}` is not an argument of spicy(): the cell method always uses the patient frailty and the "
+            "image random effect, without label-clustering inflation."
+        )
     if kwargs:
         raise TypeError(f"unexpected arguments: {list(kwargs)}")
     if method != "cell":
@@ -121,8 +118,8 @@ def spicy(
         )
     if combine not in ("maxT", "cauchy"):
         raise ValueError("combine must be 'maxT' or 'cauchy'.")
-    if variance not in ("cr2", "hartung_knapp", "auto"):
-        raise ValueError("variance must be 'cr2', 'hartung_knapp' or 'auto'.")
+    if variance not in ("cr2", "hartung_knapp"):
+        raise ValueError("variance must be 'cr2' or 'hartung_knapp'.")
     if effect not in ("allocation", "count"):
         raise ValueError("effect must be 'allocation' or 'count'.")
     if r is None and k is None:
@@ -156,17 +153,6 @@ def spicy(
         df[".event"] = df[survival].astype(float)
     ctx = _cell.cell_context(df, None if is_surv else condition, subject, ref=ref, survival=is_surv)
     pheno = ctx.df.iloc[ctx.first].reset_index(drop=True)
-    if variance == "auto":
-        # Hartung-Knapp (m - 2 df) when a condition has at most 5 patients, where CR2's Satterthwaite df are very
-        # small; CR2 otherwise (Hartung-Knapp's m - 2 df overstate the information of rare pairs in larger cohorts)
-        m_min = np.inf if is_surv else pd.Series(ctx.image_unit).groupby(ctx.image_group).nunique().min()
-        variance = "hartung_knapp" if m_min <= 5 else "cr2"
-        if variance == "hartung_knapp":
-            warnings.warn(
-                f'variance="auto": a condition has {m_min} patients; using the Hartung-Knapp variance on m - 2 df.',
-                stacklevel=2,
-            )
-
     Z_extra, extra_names = None, []
     if covariates is not None:
         covariates = [covariates] if isinstance(covariates, str) else list(covariates)
@@ -187,11 +173,9 @@ def spicy(
             k,
             pheno,
             covariates,
-            label_clustering,
             cores,
             adjust_abundance,
             effect,
-            image_heterogeneity,
         )
     else:
         per_r = []
@@ -201,14 +185,14 @@ def spicy(
                 pairs,
                 r=None if np.isnan(rr) else rr,
                 k=k,
-                label_clustering=label_clustering,
+                label_clustering=False,
                 n_threads=cores,
                 effect=effect,
             )
-            g.image_heterogeneity = image_heterogeneity
+            g.image_heterogeneity = True
             per_r.append(
                 [
-                    _cell.cell_pair_test(ctx, g, p[0], p[1], frailty, variance, adjust_abundance, Z_extra, extra_names)
+                    _cell.cell_pair_test(ctx, g, p[0], p[1], True, variance, adjust_abundance, Z_extra, extra_names)
                     for p in pairs
                 ]
             )
@@ -301,11 +285,9 @@ def _survival(
     k,
     pheno,
     covariates,
-    label_clustering,
     cores,
     adjust,
     effect="allocation",
-    image_heterogeneity=True,
 ):
     unit_first = np.array([int(np.argmax(ctx.image_unit == u)) for u in range(len(ctx.unit_labels))])
     time = pheno[".time"].to_numpy(float)[unit_first]
@@ -329,11 +311,11 @@ def _survival(
         pairs,
         r=None if np.isnan(rr) else rr,
         k=k,
-        label_clustering=label_clustering,
+        label_clustering=False,
         n_threads=cores,
         effect=effect,
     )
-    g.image_heterogeneity = image_heterogeneity
+    g.image_heterogeneity = True
     fits, rows = [], []
     ev = np.where(np.isfinite(event), event, 0).astype(np.int32)
     for f, t in pairs:

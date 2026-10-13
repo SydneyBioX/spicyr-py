@@ -29,7 +29,7 @@ cases <- list(
   count_adjusted = list(condition = "condition", subject = "patient", r = 30, effect = "count", adjustAbundance = TRUE),
   knn_count = list(condition = "condition", subject = "patient", k = 10, from = c("tumour", "macro"), to = c("T", "B"), effect = "count"),
   survival_count = list(condition = "os", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B", "macro"), covariates = "age", effect = "count"),
-  hk_no_clustering = list(condition = "condition", subject = "patient", r = 30, variance = "hartung_knapp", labelClustering = FALSE),
+  hartung_knapp = list(condition = "condition", subject = "patient", r = 30, variance = "hartung_knapp"),
   images_as_units = list(condition = "condition", r = 30, from = "tumour", to = c("T", "B")),
   three_levels = list(condition = "stage", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B")),
   three_levels_covariates = list(condition = "stage", subject = "patient", r = 30, from = "tumour", to = c("T", "B"), covariates = c("age", "batch")),

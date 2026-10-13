@@ -13,7 +13,7 @@ import spicyr
 HERE = Path(__file__).parent / "shared_cases"
 CELLS = pd.read_csv(HERE / "cells.csv")
 CASES = json.loads((HERE / "cases.json").read_text())
-R_TO_PY = {"labelClustering": "label_clustering", "from": "from_", "adjustAbundance": "adjust_abundance"}
+R_TO_PY = {"from": "from_", "adjustAbundance": "adjust_abundance"}
 
 
 def run(args):
@@ -52,21 +52,19 @@ def test_case_matches_r(name):
         np.testing.assert_allclose(m["p_value_py"], m["p_value_r"], rtol=1e-7, atol=1e-10)
 
 
-def test_variance_auto():
-    """CR2 by default; variance="auto": Hartung-Knapp when a condition has at most 5 patients, CR2 otherwise."""
+def test_variance():
+    """CR2 for every study size; Hartung-Knapp (m - 2 df) only on request; the removed arguments are refused."""
     pts = CELLS[["patient", "condition"]].drop_duplicates()
     keep = pts.groupby("condition")["patient"].apply(lambda s: list(s)[:4]).explode()
     small = CELLS[CELLS["patient"].isin(keep)]
     rd = spicyr.spicy(small, condition="condition", subject="patient", r=20, from_="tumour", to="T")
     assert rd.variance == "cr2"
-    res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=20, from_="tumour", to="T", variance="auto")
-    assert res.variance == ("hartung_knapp" if pts["condition"].value_counts().min() <= 5 else "cr2")
-    with pytest.warns(UserWarning, match="Hartung-Knapp"):
-        ra = spicyr.spicy(
-            small, condition="condition", subject="patient", r=20, from_="tumour", to="T", variance="auto"
-        )
     rh = spicyr.spicy(
         small, condition="condition", subject="patient", r=20, from_="tumour", to="T", variance="hartung_knapp"
     )
-    assert ra.variance == "hartung_knapp"
-    np.testing.assert_allclose(ra.cell_results["p_value"], rh.cell_results["p_value"])
+    assert rh.variance == "hartung_knapp"
+    np.testing.assert_allclose(rh.cell_results["df"], 6)
+    with pytest.raises(ValueError):
+        spicyr.spicy(small, condition="condition", subject="patient", variance="auto")
+    with pytest.raises(TypeError, match="not an argument"):
+        spicyr.spicy(small, condition="condition", subject="patient", label_clustering=True)

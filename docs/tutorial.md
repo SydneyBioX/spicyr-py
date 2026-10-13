@@ -471,12 +471,11 @@ of each, and the denominator is $n$, an analogue of Ripley's K function.
 Images from the same patient are combined, giving more weight to more informative images (usually those with more
 `to` cells), up to a limit: a patient's images can differ in their true effect, by an amount estimated from the
 spread between each patient's images (DerSimonian and Laird), so one large image cannot outweigh the patient's other
-images (`image_heterogeneity=True`, the default). Each patient has its own true effect, which varies around its group's mean by an amount estimated
+images. Each patient has its own true effect, which varies around its group's mean by an amount estimated
 from the data (a frailty, or random-effects, model). The difference between groups, adjusted for any covariates, is
 tested with a small-sample cluster-robust (CR2) variance on
 Satterthwaite degrees of freedom, with patients as the clusters. This is designed to keep false positives near the
-nominal rate even with modest numbers of patients. With `label_clustering=True`, the within-image variance is inflated
-when the `to` cells cluster among themselves. A paper describing the method is in preparation.
+nominal rate even with modest numbers of patients. A paper describing the method is in preparation.
 
 ## Small studies
 
@@ -491,7 +490,7 @@ in both groups and can give too many small p-values for rare cell types, so it i
 
 ## Reporting results
 
-A methods sentence might read: "We used spicyr (version 1.99.10) to test, for every ordered pair of cell types,
+A methods sentence might read: "We used spicyr (version 1.99.11) to test, for every ordered pair of cell types,
 whether the fraction of `to` cells with at least one `from` cell within 25 µm, relative to random labelling of the
 cells in each image, differed between ER+ and ER− patients, with patients as the units of analysis. P-values were adjusted across pairs by the Benjamini–Hochberg method." Show a
 per-patient plot (`box_plot()`) and an image of the pair (`plot_image()`) alongside the p-value. Please cite
