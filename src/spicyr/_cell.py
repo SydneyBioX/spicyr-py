@@ -155,6 +155,21 @@ class Graph:
     image_heterogeneity: bool = False
 
 
+def cell_graphs_radii(ctx: Context, radii, effect: str = "allocation") -> list:
+    """Several radii from one neighbour search.
+
+    One Graph per radius, each identical to cell_graph(ctx, pairs, r=radius, label_clustering=False, effect=effect).
+    """
+    allocation = effect == "allocation"
+    out = []
+    for a, b in ctx.data.multi_radius_totals(np.asarray(radii, float), allocation):
+        if allocation:
+            out.append(Graph(False, effect, np.zeros(0), any=a, self_expected=b))
+        else:
+            out.append(Graph(False, effect, np.zeros(0), totals=a, sq=b))
+    return out
+
+
 def cell_graph(
     ctx: Context, pairs, r=None, k=None, label_clustering=True, window="convex", n_threads=1, effect="allocation"
 ) -> Graph:

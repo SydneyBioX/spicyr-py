@@ -74,3 +74,17 @@ def test_maxt_radius_limit():
     """The exact max-T takes up to six radii; Davies takes a fine grid."""
     with pytest.raises(ValueError, match="davies"):
         spicyr.spicy(CELLS, condition="condition", subject="patient", r=list(range(5, 45, 5)), from_="tumour", to="T")
+
+
+def test_radii_one_search():
+    """Several radii from one neighbour search equal the single-radius graphs."""
+    from spicyr import _cell
+
+    ctx = _cell.cell_context(CELLS, "condition", "patient")
+    radii = [5.0, 12.5, 20.0, 40.0]
+    for eff, names in (("allocation", ("any", "self_expected")), ("count", ("totals", "sq"))):
+        gs = _cell.cell_graphs_radii(ctx, radii, eff)
+        for r, g in zip(radii, gs, strict=True):
+            g1 = _cell.cell_graph(ctx, [("tumour", "T")], r=r, label_clustering=False, effect=eff)
+            for nm in names:
+                np.testing.assert_array_equal(getattr(g, nm), getattr(g1, nm))

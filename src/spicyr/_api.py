@@ -182,16 +182,23 @@ def spicy(
         )
     else:
         per_r = []
-        for rr in radii:
-            g = _cell.cell_graph(
-                ctx,
-                pairs,
-                r=None if np.isnan(rr) else rr,
-                k=k,
-                label_clustering=False,
-                n_threads=cores,
-                effect=effect,
-            )
+        # several radii: one neighbour search at the largest radius gives every radius's graph
+        graphs = (
+            _cell.cell_graphs_radii(ctx, radii, effect)
+            if len(radii) > 1
+            else [
+                _cell.cell_graph(
+                    ctx,
+                    pairs,
+                    r=None if np.isnan(radii[0]) else radii[0],
+                    k=k,
+                    label_clustering=False,
+                    n_threads=cores,
+                    effect=effect,
+                )
+            ]
+        )
+        for g in graphs:
             g.image_heterogeneity = True
             per_r.append(
                 [

@@ -80,7 +80,15 @@ PYBIND11_MODULE(_core, m) {
       .def("pair_neighbour_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_totals(knn)); })
       .def("pair_neighbour_out_sq_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_out_sq_totals(knn)); })
       .def("pair_neighbour_any_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_any_totals(knn)); })
-      .def("self_any_expected", [](const Dataset& d, bool knn) { return arr(d.self_any_expected(knn)); });
+      .def("self_any_expected", [](const Dataset& d, bool knn) { return arr(d.self_any_expected(knn)); })
+      // several radii from one neighbour search: per radius (any, self_expected) or (totals, sq), as the single-radius calls
+      .def("multi_radius_totals", [](Dataset& d, const DoubleArray& radii, bool allocation) {
+        Dataset::MultiRadiusTotals m = d.multi_radius_totals(vec<double>(radii), allocation);
+        py::list out;
+        for (std::size_t k = 0; k < radii.size(); ++k)
+          out.append(allocation ? py::make_tuple(arr(m.any[k]), arr(m.self_expected[k])) : py::make_tuple(arr(m.totals[k]), arr(m.sq[k])));
+        return out;
+      }, py::arg("radii"), py::arg("allocation"));
 
   m.def("pt_two_sided", [](double t, double df) { return pt_two_sided(t, df); });
   m.def("norm_quantile", [](double p) { return norm_quantile(p); });
