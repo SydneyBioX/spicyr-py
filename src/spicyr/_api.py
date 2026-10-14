@@ -78,7 +78,8 @@ def spicy(
         Image- or patient-level columns to adjust for. The effect of each is reported as ``<column>_effect`` and
         ``<column>_p_value`` (one column per level after the first for a categorical covariate).
     r
-        Radius, or several radii combined by ``combine`` ("maxT" or "cauchy"). Default 50.
+        Radius, or several radii combined by ``combine`` ("maxT", up to 6 radii; "davies", Davies' bound for the
+        same maximum, for many radii; or "cauchy"). Default 50.
     from_, to
         Cell types to test (all ordered pairs by default).
     method
@@ -116,8 +117,8 @@ def spicy(
         raise NotImplementedError(
             "method='image' (the original spicyR test) is not yet available in Python; use spicyR in R."
         )
-    if combine not in ("maxT", "cauchy"):
-        raise ValueError("combine must be 'maxT' or 'cauchy'.")
+    if combine not in ("maxT", "davies", "cauchy"):
+        raise ValueError("combine must be 'maxT', 'davies' or 'cauchy'.")
     if variance not in ("cr2", "hartung_knapp"):
         raise ValueError("variance must be 'cr2' or 'hartung_knapp'.")
     if effect not in ("allocation", "count"):
@@ -165,6 +166,8 @@ def spicy(
     radii = [np.nan] if k is not None else sorted(set(np.atleast_1d(r).astype(float)))
     if len(radii) > 1 and not is_surv and len(ctx.levels) > 2:
         raise ValueError("several radii are supported for two conditions; give one `r`.")
+    if combine == "maxT" and len(radii) > 6 and not is_surv:
+        raise ValueError('combine="maxT" supports up to 6 radii; use combine="davies" for more.')
     if is_surv:
         res = _survival(
             ctx,
@@ -245,8 +248,9 @@ def _combine(per_r, radii, ctx, adjusted, combine):
             tt = np.array([tests[i]["difference"] for i in ok], float) / np.array([tests[i]["se"] for i in ok], float)
         df_ = np.array([tests[i]["df"] for i in ok])
         pv = np.array([tests[i]["p"] for i in ok])
-        if combine == "maxT":
-            p, best = _core.max_t([list(tests[i]["influence"]) for i in ok], tt, df_)
+        if combine in ("maxT", "davies"):
+            fun = _core.max_t if combine == "maxT" else _core.davies_max
+            p, best = fun([list(tests[i]["influence"]) for i in ok], tt, df_)
         else:
             best = int(np.argmin(pv))
             p = _core.cauchy_combine(pv)

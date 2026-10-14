@@ -37,6 +37,7 @@ cases <- list(
   knn = list(condition = "condition", subject = "patient", k = 10, from = c("tumour", "macro"), to = c("T", "B")),
   radii_maxT = list(condition = "condition", subject = "patient", r = c(10, 20, 40), from = "tumour", to = c("T", "B", "macro")),
   radii_cauchy = list(condition = "condition", subject = "patient", r = c(10, 20, 40), from = "tumour", to = c("T", "B"), combine = "cauchy"),
+  radii_davies = list(condition = "condition", subject = "patient", r = seq(5, 40, by = 5), from = "tumour", to = c("T", "B"), combine = "davies"),
   survival = list(condition = "os", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B", "macro"), covariates = "age"),
   covariates_missing = list(condition = "condition", subject = "patient", r = 30, covariates = c("age_na", "batch"), from = c("tumour", "T")),
   survival_missing = list(condition = "os", subject = "patient", r = 30, from = "T", to = c("tumour", "B"), covariates = "age_na")

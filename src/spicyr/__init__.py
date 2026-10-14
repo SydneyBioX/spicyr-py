@@ -10,5 +10,5 @@ from ._input import format_data
 from ._plots import plot_image
 from ._results import SpicyResults
 
-__version__ = "1.99.11"
+__version__ = "1.99.12"
 __all__ = ["spicy", "col_test", "get_prop", "format_data", "plot_image", "SpicyResults", "datasets", "__version__"]

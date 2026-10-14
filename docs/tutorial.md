@@ -351,8 +351,10 @@ Restricting `from_` and `to` does not change the results for the pairs that are 
 ## Which radius?
 
 The scale of an interaction is rarely known in advance. Give several radii and spicyr tests them together, using a
-max-T test that accounts for the strong correlation between neighbouring radii (`combine="cauchy"` is an
-alternative).
+max-T test that accounts for the strong correlation between neighbouring radii. The exact max-T handles up to six
+radii; for a finer grid, such as every 2 µm up to 50 µm, `combine="davies"` uses Davies' bound for the maximum over a
+smooth range of radii, which stays close to the exact max-T when neighbouring radii are highly correlated.
+`combine="cauchy"` is another alternative.
 
 ```{code-cell} ipython3
 res_r = spicyr.spicy(adata, condition="ER", subject="metabricId", r=[10, 25, 50, 75],
@@ -490,7 +492,7 @@ in both groups and can give too many small p-values for rare cell types, so it i
 
 ## Reporting results
 
-A methods sentence might read: "We used spicyr (version 1.99.11) to test, for every ordered pair of cell types,
+A methods sentence might read: "We used spicyr (version 1.99.12) to test, for every ordered pair of cell types,
 whether the fraction of `to` cells with at least one `from` cell within 25 µm, relative to random labelling of the
 cells in each image, differed between ER+ and ER− patients, with patients as the units of analysis. P-values were adjusted across pairs by the Benjamini–Hochberg method." Show a
 per-patient plot (`box_plot()`) and an image of the pair (`plot_image()`) alongside the p-value. Please cite

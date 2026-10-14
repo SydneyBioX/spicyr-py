@@ -172,6 +172,11 @@ PYBIND11_MODULE(_core, m) {
     return py::make_tuple(r.p, r.best);
   });
 
+  m.def("davies_max", [](const std::vector<std::vector<double>>& influence, const DoubleArray& t, const DoubleArray& df) {
+    MaxTResult r = davies_max(influence, vec<double>(t), vec<double>(df));
+    return py::make_tuple(r.p, r.best);
+  });
+
   m.def("mvn_outside", [](const DoubleArray& lower, const DoubleArray& upper, const DoubleArray& R) {
     return mvn_outside(vec<double>(lower), vec<double>(upper), vec<double>(R), static_cast<int>(lower.size()));
   });

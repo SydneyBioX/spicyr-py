@@ -68,3 +68,9 @@ def test_variance():
         spicyr.spicy(small, condition="condition", subject="patient", variance="auto")
     with pytest.raises(TypeError, match="not an argument"):
         spicyr.spicy(small, condition="condition", subject="patient", label_clustering=True)
+
+
+def test_maxt_radius_limit():
+    """The exact max-T takes up to six radii; Davies takes a fine grid."""
+    with pytest.raises(ValueError, match="davies"):
+        spicyr.spicy(CELLS, condition="condition", subject="patient", r=list(range(5, 45, 5)), from_="tumour", to="T")

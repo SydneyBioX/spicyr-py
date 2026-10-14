@@ -96,6 +96,14 @@
     "to": ["T", "B"],
     "combine": "cauchy"
   },
+  "radii_davies": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": [5, 10, 15, 20, 25, 30, 35, 40],
+    "from": "tumour",
+    "to": ["T", "B"],
+    "combine": "davies"
+  },
   "survival": {
     "condition": "os",
     "subject": "patient",
