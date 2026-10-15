@@ -34,7 +34,7 @@ def spicy(
     cores=1,
     survival=None,
     table_key="table",
-    images=None,
+    image_info=None,
     **kwargs,
 ) -> SpicyResults:
     """Test whether the co-localisation of cell types differs between conditions, or is associated with survival.
@@ -115,10 +115,11 @@ def spicy(
         Threads. Batches of whole images are read and summarised in parallel; results do not depend on it.
     table_key
         The annotation table of a SpatialData object or store.
-    images
-        A table with one row per image (index: the image IDs), for ``condition``, ``subject``, covariates or the
-        survival columns that are not columns of the cell table: a DataFrame, an AnnData object (its obs), or the
-        key of a table of the SpatialData object or store.
+    image_info
+        A table with one row per image, for ``condition``, ``subject``, covariates or the survival columns that are
+        not columns of the cell table: a DataFrame, an AnnData object (its obs), or the key of a table of the
+        SpatialData object or store. Its ``image_id`` column, or else its index, gives the image IDs. Every image of
+        the cells needs a row, and every row an image.
     """
     if "from" in kwargs:
         from_ = kwargs.pop("from")
@@ -145,8 +146,8 @@ def spicy(
     if k is not None:
         r = None
     src = cell_source(cells, image_id, cell_type, spatial_coords, table_key)
-    if isinstance(images, str) and type(cells).__name__ == "SpatialData":
-        images = cells.tables[images].obs
+    if isinstance(image_info, str) and type(cells).__name__ == "SpatialData":
+        image_info = cells.tables[image_info].obs
     is_surv = survival is not None
     if is_surv and not isinstance(survival, str):
         if len(survival) != 2:
@@ -154,7 +155,15 @@ def spicy(
         condition, survival = survival[0], survival[1]
     if condition is None:
         raise ValueError("give `condition` (the column of the groups) or `survival` (time and event columns).")
-    ctx = _cell.cell_context(src, None if is_surv else condition, subject, images=images, survival=is_surv, ref=ref)
+    ctx = _cell.cell_context(
+        src,
+        None if is_surv else condition,
+        subject,
+        image_info=image_info,
+        survival=is_surv,
+        ref=ref,
+        image_id=image_id,
+    )
     types = ctx.type_labels
     bad = [
         t

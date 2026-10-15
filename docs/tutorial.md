@@ -490,34 +490,80 @@ direction with `box_plot()`.
 in both groups and can give too many small p-values for rare cell types, so it is not the default.
 :::
 
-## Large data sets
+## Very large data sets: SpatialData stores
 
-`spicy()` reads a SpatialData store from disk without loading it. Give the path of the store and the table's
-columns:
+Some imaging studies hold more cells than fit in memory. `spicy()` also reads a SpatialData Zarr store, or an
+AnnData Zarr store, from disk: give the path of the store as `cells`. Every neighbour count is a sum within one
+image, so spicyr loads the image and cell-type columns once as integer codes and reads the coordinates one batch of
+whole images at a time. Memory then depends on the size of an image and on the number of threads (`cores`), not on
+the size of the study, and the results are the same as for the same cells in memory.
 
-```python
-res = spicyr.spicy("cells.zarr", condition="condition", subject="patient", cell_type="cell_type", r=25, cores=8)
+To make a small store, we write 20 cores of each ER group as an AnnData Zarr store, the format of each table of a
+SpatialData store. The cell table keeps the core, the cell type and the coordinates (`obsm["spatial"]`); a
+DataFrame holds one row per core, with the patient and ER status.
+
+```{code-cell} ipython3
+:tags: [remove-stderr]
+
+import tempfile
+from pathlib import Path
+
+import anndata as ad
+
+some_cores = [c for g in ["ER-", "ER+"] for c in sorted(adata.obs.loc[adata.obs["ER"] == g, "file_id"].unique())[:20]]
+small = adata[adata.obs["file_id"].isin(some_cores)]
+small = small[np.argsort(small.obs["file_id"].to_numpy(), kind="stable")].copy()  # the rows of each core together
+core_info = small.obs.drop_duplicates("file_id").set_index("file_id")[["metabricId", "ER"]]
+path = Path(tempfile.mkdtemp()) / "metabric.zarr"
+ad.AnnData(obs=small.obs[["file_id", "description"]], obsm={"spatial": small.obsm["spatial"]}).write_zarr(path)
+print(small.n_obs, "cells of", len(core_info), "cores")
 ```
 
-The neighbour counts behind every pair are sums within images, so spicyr needs only one batch of whole images at a
-time. It loads the image and cell-type columns once as integer codes, reads the coordinates (`obsm["spatial"]`, or
-the obs columns named by `spatial_coords`) a batch of images at a time, and reads the condition, subject and
-covariates once per image. Memory then depends on the size of an image and on the number of threads (`cores`),
-not on the size of the data set. For one billion cells (500 images of two million cells and 10 cell types, every
-ordered pair tested at 25 µm) the analysis took 6 minutes on 8 threads with a peak memory of 5.5 GB, and
-31 minutes on one thread with 3.4 GB, within the memory of a laptop. Results are identical to those from the same cells in
-memory, and do not depend on `cores`.
+`spicy()` reads the store with the arguments used above. The condition and the patient are not columns of the cell
+table, so `image_info` gives them.
 
-:::{note}
-The store is read fastest when the table's rows are grouped by image, as when the table is sorted by its region
-column before it is written. Categorical image and cell-type columns keep the codes small (one or two bytes per
-cell). The condition, subject and covariates can also come from a table with one row per image, given as
-`images=` (a DataFrame indexed by image, or the key of such a table in the store).
+```{code-cell} ipython3
+res_store = spicyr.spicy(str(path), condition="ER", subject="metabricId", r=25, image_id="file_id",
+                         cell_type="description", image_info=core_info)
+```
+
+The result is that of the same cells in memory:
+
+```{code-cell} ipython3
+res_memory = spicyr.spicy(small, condition="ER", subject="metabricId", r=25, image_id="file_id",
+                          cell_type="description")
+pd.testing.assert_frame_equal(res_store.cell_results, res_memory.cell_results, check_exact=True)
+res_store.cell_results.equals(res_memory.cell_results)
+```
+
+Every estimate, standard error and p-value is identical, not just close. A SpatialData store, or a SpatialData object
+read from one with the spatialdata package, is analysed in the same way:
+
+```python
+import spatialdata as sd
+
+sdata = sd.read_zarr("cells.zarr")
+res = spicyr.spicy(sdata, condition="ER", subject="metabricId", cell_type="description", image_info="images")
+```
+
+A few arguments matter for stores. `table_key` chooses the cell table of a SpatialData store or object (by default
+`"table"`). `image_info` supplies the condition, the patient, covariates or the survival columns when they are not
+columns of the cell table: give a DataFrame (or an AnnData object) whose `image_id` column, or else its index,
+holds the image IDs, or the key of a table in the store. Every image needs a row in it. `spatial_coords` names
+either two `obs` columns or one `obsm` array, whose first two columns are used; by default `obsm["spatial"]`.
+
+:::{tip}
+Store the cells grouped by image. When the rows of each image sit together, as they do when the table is sorted by
+its region column before it is written, each batch of images is read as one slice of rows. Otherwise each batch
+needs a pass over the image codes. Categorical image and cell-type columns also keep the store small.
 :::
+
+In a benchmark on a synthetic store of one billion cells in 500 images, `spicy()` ran on one thread in under 4 GB of
+memory.
 
 ## Reporting results
 
-A methods sentence might read: "We used spicyr (version 1.99.14) to test, for every ordered pair of cell types,
+A methods sentence might read: "We used spicyr (version 1.99.15) to test, for every ordered pair of cell types,
 whether the fraction of `to` cells with at least one `from` cell within 25 µm, relative to random labelling of the
 cells in each image, differed between ER+ and ER− patients, with patients as the units of analysis. P-values were adjusted across pairs by the Benjamini–Hochberg method." Show a
 per-patient plot (`box_plot()`) and an image of the pair (`plot_image()`) alongside the p-value. Please cite

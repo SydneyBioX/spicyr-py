@@ -56,7 +56,7 @@ def enumerate_pairs(from_, to, all_types):
     return [(f, t) for f in ft for t in tt]
 
 
-# cells per batch of whole images in cell_stream() (per thread): the batch's coordinates and neighbour index stay small
+# cells per batch of whole images in cell_stream(), per thread: the coordinates read at a time stay small
 BATCH_CELLS = 1 << 21
 
 
@@ -93,31 +93,38 @@ class Context:
         return pd.DataFrame({c: self.per_image(c) for c in dict.fromkeys(names)}, index=range(self.n_images))
 
 
-def _image_table(images, image_labels, source=None):
-    """The per-image table, one row per image in the analysis's order (index: the image IDs as strings)."""
-    if images is None:
+def _image_table(image_info, image_labels, source=None, image_id=None):
+    """The per-image table, one row per image in the analysis's order.
+
+    Image IDs are its ``image_id`` column, or else its index. Every image needs a row, and every row an image.
+    """
+    if image_info is None:
         return None
-    if isinstance(images, str):
+    if isinstance(image_info, str):
         tables = getattr(source, "root", None)
-        if tables is not None and "tables" in tables and images in tables["tables"]:
+        if tables is not None and "tables" in tables and image_info in tables["tables"]:
             import anndata as ad
 
-            images = ad.io.read_elem(tables["tables"][images]["obs"])
+            image_info = ad.io.read_elem(tables["tables"][image_info]["obs"])
         else:
-            raise ValueError(f"no per-image table '{images}'.")
-    if type(images).__name__ == "AnnData":
-        images = images.obs
-    if not isinstance(images, pd.DataFrame):
-        raise TypeError("`images` must be a DataFrame with one row per image (index: the image IDs).")
-    key = as_str(pd.Series(images.index.to_numpy()))
+            raise ValueError(f"no per-image table '{image_info}'.")
+    if type(image_info).__name__ == "AnnData":
+        image_info = image_info.obs
+    if not isinstance(image_info, pd.DataFrame):
+        raise TypeError("`image_info` must be a DataFrame with one row per image (index: the image IDs).")
+    ids = image_info[image_id] if image_id is not None and image_id in image_info.columns else image_info.index
+    key = as_str(pd.Series(np.asarray(ids)))
     if key.duplicated().any():
-        raise ValueError("`images` has more than one row for an image.")
+        raise ValueError("`image_info` has more than one row for an image.")
+    unknown = [k for k in key if k not in set(image_labels)]
+    if unknown:
+        raise ValueError(f"images in `image_info` not found among the cells: {unknown[:5]}")
     pos = pd.Index(key.to_numpy())
     idx = pos.get_indexer(image_labels)
     if (idx < 0).any():
         miss = [image_labels[i] for i in np.flatnonzero(idx < 0)[:5]]
-        raise ValueError(f"images missing from `images`: {miss}")
-    return images.iloc[idx].reset_index(drop=True)
+        raise ValueError(f"images missing from `image_info`: {miss}")
+    return image_info.iloc[idx].reset_index(drop=True)
 
 
 def _values(ctx, name, first_row_code):
@@ -137,7 +144,7 @@ def _values(ctx, name, first_row_code):
 
 
 def cell_context(
-    cells, condition, subject, ref=None, survival=False, dataset=False, images=None, by_image=True
+    cells, condition, subject, ref=None, survival=False, dataset=False, image_info=None, by_image=True, image_id=None
 ) -> Context:
     """Image-level layout shared by every analysis of a data set.
 
@@ -188,7 +195,7 @@ def cell_context(
         image_rows=image_rows,
         image_order=image_order,
     )
-    ctx.images = _image_table(images, image_labels, src)
+    ctx.images = _image_table(image_info, image_labels, src, image_id)
 
     # units: patients if `subject` maps several images to one patient, else images
     if subject is not None:
@@ -281,8 +288,9 @@ def cell_stream(ctx: Context, radii=None, k=None, allocation=True, n_threads=1, 
     """The neighbour totals of every radius (or of k), image by image from the cells' source.
 
     One element per radius (one for kNN): (any, self_expected) or (totals, sq), exactly as the whole-data Dataset
-    gives them. Batches of whole images (about `batch_cells` cells each) are read and summarised on up to `n_threads`
-    threads; the neighbour search of an image runs on one thread, so the results do not depend on the threads.
+    gives them. Batches of whole images (about `batch_cells` cells per thread) are read one after another, the next
+    while the core sums the current one; in the core each image runs in a Dataset of its own, the images shared among
+    `n_threads` threads, so the results do not depend on the threads.
     """
     T = len(ctx.type_labels)
     knn = k is not None
@@ -290,39 +298,39 @@ def cell_stream(ctx: Context, radii=None, k=None, allocation=True, n_threads=1, 
     K = 1 if knn else len(rad)
     out_a = [np.zeros(ctx.n_images * T * T) for _ in range(K)]
     out_b = [np.zeros(ctx.n_images * T * (1 if allocation else T)) for _ in range(K)]
-    batches = _batches(ctx, batch_cells or BATCH_CELLS)
     n_threads = max(1, int(n_threads))
-    inner = n_threads if len(batches) == 1 else 1
+    batches = _batches(ctx, (batch_cells or BATCH_CELLS) * n_threads)
     src = ctx.source
 
-    def run(images):
+    def read(images):
         rows = _batch_rows(ctx, images)
         x, y = src.coords(rows)
-        _core.stream_batch(
-            x,
-            y,
-            np.ascontiguousarray(src.image_codes[rows]),
-            np.ascontiguousarray(src.type_codes[rows]),
-            ctx.image_map,
-            ctx.type_map,
-            T,
-            rad,
-            int(k) if knn else 0,
-            allocation,
-            out_a,
-            out_b,
-            inner,
-        )
+        return x, y, np.ascontiguousarray(src.image_codes[rows]), np.ascontiguousarray(src.type_codes[rows])
 
-    if n_threads == 1 or len(batches) == 1:
-        for b in batches:
-            run(b)
-    else:
-        from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor
 
-        with ThreadPoolExecutor(min(n_threads, len(batches))) as pool:
-            for f in [pool.submit(run, b) for b in batches]:
-                f.result()
+    with ThreadPoolExecutor(1) as reader:
+        ahead = reader.submit(read, batches[0])
+        for i in range(len(batches)):
+            x, y, im, ty = ahead.result()
+            if i + 1 < len(batches):
+                ahead = reader.submit(read, batches[i + 1])
+            _core.stream_batch(
+                x,
+                y,
+                im,
+                ty,
+                ctx.image_map,
+                ctx.type_map,
+                T,
+                rad,
+                int(k) if knn else 0,
+                allocation,
+                out_a,
+                out_b,
+                n_threads,
+            )
+            del x, y, im, ty
     return list(zip(out_a, out_b, strict=True))
 
 

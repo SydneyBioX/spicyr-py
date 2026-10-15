@@ -8,9 +8,13 @@ share one C++ core, so that they give the same results.
 - `src/core` is a verbatim copy of `src/core` in spicyR. Never edit it here: change it in spicyR, then run
   `tools/sync_core.sh /path/to/spicyR`, which copies it and records its checksums in `src/core/CHECKSUMS`.
   `tests/test_core_sync.py` fails if the copy has been edited.
-- `src/bindings.cpp` (pybind11) mirrors spicyR's R bindings (the image-by-image glue of the cell method mirrors
-  `cell_layout` and `cell_stream_totals` in spicyR's `src/glm_bindings.cpp`), and `src/spicyr/_cell.py` and `_api.py` mirror
+- `src/bindings.cpp` (pybind11) mirrors spicyR's R bindings, and `src/spicyr/_cell.py` and `_api.py` mirror
   spicyR's `R/cell.R` and `R/spicy_main.R` line for line. No statistics live in the Python code.
+- The cell method's loop over images lives in the core (`src/core/src/stream.cpp`, `spicyglm/stream.hpp`), shared
+  with spicyR: the passes over the image and type codes (`scan_codes`, `constant_within`, `rows_of_images`) and the
+  neighbour sums of a batch of whole images (`rows_totals`), each image in a Dataset of its own, the images shared
+  among threads. The bindings only describe NumPy arrays to it; reading the cells (pandas, AnnData, zarr in
+  `_source.py`) and choosing the batches (`_cell.cell_stream()`) stay in Python.
 
 ## Keeping the twins identical
 

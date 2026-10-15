@@ -16,7 +16,7 @@ CELLS = pd.read_csv(Path(__file__).parent / "shared_cases" / "cells.csv")
 ARGS = {"condition": "condition", "subject": "patient", "r": 30, "from_": ["tumour", "T"], "to": ["T", "B", "macro"]}
 
 
-def write_store(path, cells, coords="obsm", dtype=np.float64, per_image=False):
+def write_store(path, cells, coords="obsm", dtype=np.float64, per_image=False, drop=()):
     """A SpatialData store of `cells`: a table annotating one region per image, and a per-image table."""
     from spatialdata.models import TableModel
 
@@ -28,6 +28,7 @@ def write_store(path, cells, coords="obsm", dtype=np.float64, per_image=False):
     img = cells.groupby("imageID", sort=True)[["condition", "patient"]].first()
     if per_image:
         obs = obs.drop(columns=["condition", "patient"])
+    obs = obs.drop(columns=list(drop))
     xy = cells[["x", "y"]].to_numpy().astype(dtype)
     if coords == "obsm":
         a = ad.AnnData(obs=obs, obsm={"spatial": xy})
@@ -59,6 +60,7 @@ def stores(tmp_path_factory):
         "obs_xy": write_store(d / "obs_xy.zarr", CELLS, coords="obs"),
         "float32": write_store(d / "float32.zarr", CELLS, dtype=np.float32),
         "per_image": write_store(d / "per_image.zarr", CELLS, per_image=True),
+        "no_outcome": write_store(d / "no_outcome.zarr", CELLS, per_image=True, drop=["time", "event", "age"]),
         "shuffled_cells": shuffled,
     }
 
@@ -97,11 +99,31 @@ def test_survival_from_store(stores):
 def test_per_image_table(stores):
     """Condition and subject from a table with one row per image (a table of the store, or a DataFrame)."""
     ref = spicyr.spicy(CELLS, **ARGS)
-    same(spicyr.spicy(stores["per_image"], images="images", **ARGS), ref)
+    same(spicyr.spicy(stores["per_image"], image_info="images", **ARGS), ref)
     img = CELLS.groupby("imageID")[["condition", "patient"]].first()
-    same(spicyr.spicy(CELLS.drop(columns=["condition", "patient"]), images=img, **ARGS), ref)
-    with pytest.raises(ValueError, match="missing from `images`"):
-        spicyr.spicy(CELLS, images=img.iloc[1:], **ARGS)
+    lean = CELLS.drop(columns=["condition", "patient"])
+    same(spicyr.spicy(lean, image_info=img, **ARGS), ref)
+    same(spicyr.spicy(lean, image_info=img.iloc[::-1].reset_index(), **ARGS), ref)  # an imageID column, any order
+    same(spicyr.spicy(stores["per_image"], image_info=img, **ARGS), ref)
+    with pytest.raises(ValueError, match="missing from `image_info`"):
+        spicyr.spicy(CELLS, image_info=img.iloc[1:], **ARGS)
+    with pytest.raises(ValueError, match="missing from `image_info`"):
+        spicyr.spicy(stores["per_image"], image_info=img.iloc[1:], **ARGS)
+    extra = pd.concat([img, img.iloc[:1].rename(index=lambda _: "nope")])
+    with pytest.raises(ValueError, match="not found among the cells"):
+        spicyr.spicy(lean, image_info=extra, **ARGS)
+    with pytest.raises(ValueError, match="more than one row"):
+        spicyr.spicy(lean, image_info=pd.concat([img, img.iloc[:1]]), **ARGS)
+
+
+def test_survival_from_per_image_table(stores):
+    """A survival outcome from a per-image table, for a DataFrame and for a store."""
+    args = {"survival": ("time", "event"), "subject": "patient", "r": 30, "from_": "tumour", "covariates": "age"}
+    ref = spicyr.spicy(CELLS, **args)
+    img = CELLS.groupby("imageID")[["patient", "time", "event", "age"]].first()
+    lean = CELLS.drop(columns=["patient", "time", "event", "age"])
+    same(spicyr.spicy(lean, image_info=img, **args), ref)
+    same(spicyr.spicy(stores["no_outcome"], image_info=img, **args), ref)
 
 
 def test_batches_and_threads(stores, monkeypatch):
