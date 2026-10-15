@@ -13,7 +13,7 @@ from dataclasses import dataclass
 import numpy as np
 import pandas as pd
 
-from . import _core
+from . import _core, _source
 
 
 def p_adjust_bh(p) -> np.ndarray:
@@ -34,19 +34,9 @@ def p_adjust_bh(p) -> np.ndarray:
     return out
 
 
-def _r_str_value(v) -> str:
-    if isinstance(v, (float, np.floating)):
-        return "NaN" if np.isnan(v) else f"{v:.15g}"
-    return str(v)
-
-
-def as_str(col: pd.Series) -> pd.Series:
-    """A column as strings, the way R's as.character() writes it (2.0 is "2"), so that labels match spicyR's."""
-    if isinstance(col.dtype, pd.CategoricalDtype):
-        return col.cat.rename_categories([_r_str_value(c) for c in col.cat.categories]).astype(str).where(col.notna())
-    if pd.api.types.is_float_dtype(col):
-        return col.map(_r_str_value).where(col.notna())
-    return col.astype(str).where(col.notna())
+# as_str() lives with the cell sources (labels of image and cell-type codes); kept here for the callers of _cell
+as_str = _source.as_str
+_r_str_value = _source._r_str_value
 
 
 def condition_levels(col: pd.Series) -> list[str]:
@@ -66,81 +56,274 @@ def enumerate_pairs(from_, to, all_types):
     return [(f, t) for f in ft for t in tt]
 
 
+# cells per batch of whole images in cell_stream() (per thread): the batch's coordinates and neighbour index stay small
+BATCH_CELLS = 1 << 21
+
+
 @dataclass
 class Context:
-    df: pd.DataFrame
+    source: object  # the cells (a _source.FrameSource or ZarrSource): codes, per-image columns, coordinates
     image_labels: list
-    image_codes: np.ndarray
     n_images: int
     unit_labels: list
     image_unit: np.ndarray
-    first: np.ndarray
+    first: np.ndarray  # first row of each image (sorted order)
     type_labels: list
     counts: np.ndarray
-    data: _core.Dataset
+    image_map: np.ndarray  # image (sorted order) of each image code; -1 if absent
+    type_map: np.ndarray  # cell type of each type code, the last entry for a missing type
+    image_rows: np.ndarray | None  # per image (sorted order): its rows [start, end) when its cells are contiguous
+    image_order: np.ndarray  # images in order of their first row
+    data: _core.Dataset | None = None
     levels: list | None = None
     image_group: np.ndarray | None = None
+    images: pd.DataFrame | None = None  # one row per image (index: image IDs) for columns not in the cell table
+
+    def has(self, name) -> bool:
+        return self.source.has(name) or (self.images is not None and name in self.images.columns)
+
+    def per_image(self, name) -> pd.Series:
+        """A column's value in each image (its first cell), or from the per-image table."""
+        if self.source.has(name):
+            return self.source.at_rows(name, self.first)
+        return self.images[name].reset_index(drop=True)
+
+    def pheno(self, names) -> pd.DataFrame:
+        """One row per image (sorted order) with the columns `names`."""
+        return pd.DataFrame({c: self.per_image(c) for c in dict.fromkeys(names)}, index=range(self.n_images))
 
 
-def cell_context(cells: pd.DataFrame, condition, subject, ref=None, survival=False) -> Context:
-    image_chr = as_str(cells["imageID"]).to_numpy()
-    image_labels = sorted(set(image_chr))
-    lab_index = {s: i for i, s in enumerate(image_labels)}
-    image_codes = np.array([lab_index[s] for s in image_chr], dtype=int)
-    ord_ = np.argsort(image_codes, kind="stable")
-    df = cells.iloc[ord_].reset_index(drop=True)
-    image_codes = image_codes[ord_]
+def _image_table(images, image_labels, source=None):
+    """The per-image table, one row per image in the analysis's order (index: the image IDs as strings)."""
+    if images is None:
+        return None
+    if isinstance(images, str):
+        tables = getattr(source, "root", None)
+        if tables is not None and "tables" in tables and images in tables["tables"]:
+            import anndata as ad
+
+            images = ad.io.read_elem(tables["tables"][images]["obs"])
+        else:
+            raise ValueError(f"no per-image table '{images}'.")
+    if type(images).__name__ == "AnnData":
+        images = images.obs
+    if not isinstance(images, pd.DataFrame):
+        raise TypeError("`images` must be a DataFrame with one row per image (index: the image IDs).")
+    key = as_str(pd.Series(images.index.to_numpy()))
+    if key.duplicated().any():
+        raise ValueError("`images` has more than one row for an image.")
+    pos = pd.Index(key.to_numpy())
+    idx = pos.get_indexer(image_labels)
+    if (idx < 0).any():
+        miss = [image_labels[i] for i in np.flatnonzero(idx < 0)[:5]]
+        raise ValueError(f"images missing from `images`: {miss}")
+    return images.iloc[idx].reset_index(drop=True)
+
+
+def _values(ctx, name, first_row_code):
+    """A per-image column at the images' first rows, and the column over all cells when it varies within images.
+
+    Returns (per-image values, all values): all values is the per-image values when the column is constant within
+    images (then the values present are those of the images' first rows), so the whole column is read only otherwise.
+    """
+    if not ctx.source.has(name):
+        v = ctx.per_image(name)
+        return v, v, None
+    v = ctx.per_image(name)
+    if ctx.source.constant_within(name, first_row_code):
+        return v, v, None
+    full = ctx.source.column(name)
+    return v, full, ctx.image_map[ctx.source.image_codes]
+
+
+def cell_context(
+    cells, condition, subject, ref=None, survival=False, dataset=False, images=None, by_image=True
+) -> Context:
+    """Image-level layout shared by every analysis of a data set.
+
+    Integer codes for images (in the C-locale order of their IDs), types and units (patients), the per-image
+    condition, and the cells per image and type. The cells stay in their source, in input order, with no sorted
+    copy: one pass gives the cells and the first row of every (image, type), and the neighbour sums are taken image
+    by image (cell_stream()). The whole-data Dataset (ctx.data, for the label-clustering factor) is built only with
+    ``dataset=True``. Cell types are in order of first appearance; by_image=True: with the cells sorted stably by
+    image in order of first appearance (as format_data() sorts them), else in row order. `cells` is a source
+    (_source.cell_source()) or a DataFrame with columns imageID, cellType, x and y.
+    """
+    src = (
+        cells
+        if hasattr(cells, "image_codes")
+        else _source.FrameSource(cells, "imageID", "cellType", cells["x"], cells["y"])
+    )
+    n_icodes, n_tcodes = len(src.image_labels), len(src.type_labels)
+    lay = _core.cell_layout(src.image_codes, n_icodes, src.type_codes, n_tcodes)
+    cnt, frs = lay["counts"], lay["first"]
+    n_code = cnt.sum(axis=1)
+    present = np.flatnonzero(n_code > 0)
+    image_labels = sorted(src.image_labels[c] for c in present)  # C-locale (code point) order, as spicyR
     n_images = len(image_labels)
-    first = np.searchsorted(image_codes, np.arange(n_images))
+    code_pos = {s: c for c, s in enumerate(src.image_labels)}
+    code_of = np.array([code_pos[s] for s in image_labels], dtype=np.int64)
+    image_map = np.full(n_icodes, -1, dtype=np.int32)
+    image_map[code_of] = np.arange(n_images, dtype=np.int32)
+    first_row_code = np.where(frs >= 0, frs, np.iinfo(np.int64).max).min(axis=1)
+    first_row_code[n_code == 0] = -1
+    first = first_row_code[code_of]
+    last = lay["last"][code_of]
+    n_img = n_code[code_of]
+    contiguous = bool(np.all(last - first + 1 == n_img))
+    image_rows = np.column_stack([first, last + 1]) if contiguous else None
+    image_order = np.argsort(first, kind="stable")  # images in order of first appearance
 
-    if subject is None or as_str(cells[subject]).nunique() == n_images:
-        unit_labels = list(image_labels)
-        image_unit = np.arange(n_images)
-    else:
-        sub = as_str(df[subject]).to_numpy()[first]
-        unit_labels = list(dict.fromkeys(sub))
-        ui = {s: i for i, s in enumerate(unit_labels)}
-        image_unit = np.array([ui[s] for s in sub], dtype=int)
+    ctx = Context(
+        source=src,
+        image_labels=image_labels,
+        n_images=n_images,
+        unit_labels=list(image_labels),
+        image_unit=np.arange(n_images),
+        first=first,
+        type_labels=[],
+        counts=np.zeros((n_images, 0)),
+        image_map=image_map,
+        type_map=np.zeros(0, np.int32),
+        image_rows=image_rows,
+        image_order=image_order,
+    )
+    ctx.images = _image_table(images, image_labels, src)
 
-    levels = image_group = None
+    # units: patients if `subject` maps several images to one patient, else images
+    if subject is not None:
+        if not ctx.has(subject):
+            raise ValueError("`subject` column not found.")
+        sv, sv_all, _ = _values(ctx, subject, first_row_code)
+        if as_str(sv_all).nunique() != n_images:
+            sub = as_str(sv).to_numpy()
+            ctx.unit_labels = list(dict.fromkeys(sub))
+            ui = {s: i for i, s in enumerate(ctx.unit_labels)}
+            ctx.image_unit = np.array([ui[s] for s in sub], dtype=int)
+
     if condition is not None and not survival:
-        levels = condition_levels(cells[condition])
+        cv, cv_all, img_of_row = _values(ctx, condition, first_row_code)
+        levels = condition_levels(cv_all)
         if len(levels) < 2:
             raise ValueError(f"`condition` needs at least two levels; found {len(levels)}.")
         if ref is not None:
             if str(ref) not in levels:
                 raise ValueError("`ref` is not a level of `condition`.")
             levels = [str(ref)] + [l for l in levels if l != str(ref)]
-        cond = as_str(df[condition]).to_numpy()
-        per_image = pd.Series(cond).groupby(image_codes).nunique()
-        if (per_image > 1).any():
-            raise ValueError(f"'{condition}' must be constant within each image.")
+        if img_of_row is not None:
+            per_image = pd.Series(as_str(cv_all).to_numpy()).groupby(img_of_row).nunique()
+            if (per_image > 1).any():
+                raise ValueError(f"'{condition}' must be constant within each image.")
         li = {l: i for i, l in enumerate(levels)}
-        image_group = np.array([li[c] for c in cond[first]], dtype=int)
-        if (pd.Series(image_group).groupby(image_unit).nunique() > 1).any():
+        ctx.levels = levels
+        ctx.image_group = np.array([li[c] for c in as_str(cv).to_numpy()], dtype=int)
+        if (pd.Series(ctx.image_group).groupby(ctx.image_unit).nunique() > 1).any():
             raise ValueError(f"each subject must belong to a single '{condition}' level.")
 
-    type_labels = list(dict.fromkeys(as_str(cells["cellType"])))
-    ti = {t: i for i, t in enumerate(type_labels)}
-    type_codes = np.array([ti[t] for t in as_str(df["cellType"])], dtype=np.int32)
-    counts = np.zeros((n_images, len(type_labels)))
-    np.add.at(counts, (image_codes, type_codes), 1.0)
-    offsets = np.concatenate([[0], np.cumsum(np.bincount(image_codes, minlength=n_images))]).astype(np.int32)
-    data = _core.Dataset(df["x"].to_numpy(float), df["y"].to_numpy(float), type_codes, offsets, len(type_labels))
-    return Context(
-        df,
-        image_labels,
-        image_codes,
-        n_images,
-        unit_labels,
-        image_unit,
-        first,
-        type_labels,
-        counts,
-        data,
-        levels,
-        image_group,
-    )
+    # cell types present (the last column of the layout is a missing type), by first appearance
+    tcol = np.flatnonzero(cnt.sum(axis=0) > 0)
+    if by_image:
+        rank = np.empty(n_icodes, dtype=np.int64)
+        rank[code_of[image_order]] = np.arange(n_images)
+        keys = []
+        for t in tcol:
+            codes_t = present[cnt[present, t] > 0]
+            c = codes_t[np.argmin(rank[codes_t])]
+            keys.append((rank[c], frs[c, t]))
+    else:
+        keys = [(frs[cnt[:, t] > 0, t].min(),) for t in tcol]
+    tcol = tcol[sorted(range(len(tcol)), key=lambda i: keys[i])]
+    ctx.type_labels = [src.type_labels[t] if t < n_tcodes else np.nan for t in tcol]
+    ctx.type_map = np.full(n_tcodes + 1, -1, dtype=np.int32)
+    ctx.type_map[tcol] = np.arange(len(tcol), dtype=np.int32)
+    ctx.counts = cnt[np.ix_(code_of, tcol)].astype(float)
+    if dataset:
+        order = np.argsort(image_map[src.image_codes], kind="stable")  # cells sorted (stably) by image
+        x, y = src.coords(order)
+        tc = src.type_codes[order].astype(np.int64)
+        tc[tc < 0] = n_tcodes
+        offsets = np.concatenate([[0], np.cumsum(ctx.counts.sum(axis=1))]).astype(np.int32)
+        ctx.data = _core.Dataset(
+            np.asarray(x, float), np.asarray(y, float), ctx.type_map[tc], offsets, len(ctx.type_labels)
+        )
+    return ctx
+
+
+def _batches(ctx, budget):
+    """Batches of whole images of about `budget` cells (one image at least).
+
+    Contiguous images (each image's cells in one run of rows) are taken in row order and read as one slice of rows;
+    otherwise images are taken in sorted order and their rows found with one pass over the image codes.
+    """
+    n_img = ctx.counts.sum(axis=1)
+    out, cur, n = [], [], 0
+    order = ctx.image_order if ctx.image_rows is not None else np.arange(ctx.n_images)
+    for i in order:
+        if cur and n + n_img[i] > budget:
+            out.append(cur)
+            cur, n = [], 0
+        cur.append(int(i))
+        n += n_img[i]
+    if cur:
+        out.append(cur)
+    return out
+
+
+def _batch_rows(ctx, images):
+    if ctx.image_rows is not None:
+        return slice(int(ctx.image_rows[images[0], 0]), int(ctx.image_rows[images[-1], 1]))
+    keep = np.zeros(len(ctx.image_map), dtype=bool)
+    keep[np.isin(ctx.image_map, images)] = True
+    return _core.rows_of_images(ctx.source.image_codes, keep)
+
+
+def cell_stream(ctx: Context, radii=None, k=None, allocation=True, n_threads=1, batch_cells=None) -> list:
+    """The neighbour totals of every radius (or of k), image by image from the cells' source.
+
+    One element per radius (one for kNN): (any, self_expected) or (totals, sq), exactly as the whole-data Dataset
+    gives them. Batches of whole images (about `batch_cells` cells each) are read and summarised on up to `n_threads`
+    threads; the neighbour search of an image runs on one thread, so the results do not depend on the threads.
+    """
+    T = len(ctx.type_labels)
+    knn = k is not None
+    rad = np.zeros(0) if knn else np.asarray(np.atleast_1d(radii), float)
+    K = 1 if knn else len(rad)
+    out_a = [np.zeros(ctx.n_images * T * T) for _ in range(K)]
+    out_b = [np.zeros(ctx.n_images * T * (1 if allocation else T)) for _ in range(K)]
+    batches = _batches(ctx, batch_cells or BATCH_CELLS)
+    n_threads = max(1, int(n_threads))
+    inner = n_threads if len(batches) == 1 else 1
+    src = ctx.source
+
+    def run(images):
+        rows = _batch_rows(ctx, images)
+        x, y = src.coords(rows)
+        _core.stream_batch(
+            x,
+            y,
+            np.ascontiguousarray(src.image_codes[rows]),
+            np.ascontiguousarray(src.type_codes[rows]),
+            ctx.image_map,
+            ctx.type_map,
+            T,
+            rad,
+            int(k) if knn else 0,
+            allocation,
+            out_a,
+            out_b,
+            inner,
+        )
+
+    if n_threads == 1 or len(batches) == 1:
+        for b in batches:
+            run(b)
+    else:
+        from concurrent.futures import ThreadPoolExecutor
+
+        with ThreadPoolExecutor(min(n_threads, len(batches))) as pool:
+            for f in [pool.submit(run, b) for b in batches]:
+                f.result()
+    return list(zip(out_a, out_b, strict=True))
 
 
 @dataclass
@@ -155,19 +338,21 @@ class Graph:
     image_heterogeneity: bool = False
 
 
-def cell_graphs_radii(ctx: Context, radii, effect: str = "allocation") -> list:
-    """Several radii from one neighbour search.
+def _graph(knn, effect, a, b):
+    if effect == "allocation":
+        return Graph(knn, effect, np.zeros(0), any=a, self_expected=b)
+    return Graph(knn, effect, np.zeros(0), totals=a, sq=b)
+
+
+def cell_graphs_radii(ctx: Context, radii, effect: str = "allocation", n_threads=1) -> list:
+    """Several radii from one neighbour search, image by image.
 
     One Graph per radius, each identical to cell_graph(ctx, pairs, r=radius, label_clustering=False, effect=effect).
     """
-    allocation = effect == "allocation"
-    out = []
-    for a, b in ctx.data.multi_radius_totals(np.asarray(radii, float), allocation):
-        if allocation:
-            out.append(Graph(False, effect, np.zeros(0), any=a, self_expected=b))
-        else:
-            out.append(Graph(False, effect, np.zeros(0), totals=a, sq=b))
-    return out
+    return [
+        _graph(False, effect, a, b)
+        for a, b in cell_stream(ctx, radii=radii, allocation=effect == "allocation", n_threads=n_threads)
+    ]
 
 
 def cell_graph(
@@ -176,42 +361,35 @@ def cell_graph(
     """Neighbour sums and the label-clustering factor at one radius (or k).
 
     effect "allocation": for every cell, whether it has any cell of each type among its neighbours; "count": how many.
+    Without the label-clustering factor (as spicy()) the sums are taken image by image (cell_stream()); the factor
+    needs the whole-data Dataset (ctx.data, from cell_context(dataset=True)).
     """
     knn = k is not None
+    allocation = effect == "allocation"
+    if not label_clustering:
+        a, b = cell_stream(ctx, radii=None if knn else r, k=k, allocation=allocation, n_threads=n_threads)[0]
+        return _graph(knn, effect, a, b)
+    if ctx.data is None:
+        raise ValueError("the label-clustering factor needs cell_context(dataset=True).")
     T = len(ctx.type_labels)
     if knn:
         ctx.data.build_knn(int(k), int(n_threads))
         scale = float(np.median(np.sqrt(k / (math.pi * ctx.counts.sum(axis=1) / ctx.data.image_areas(window)))))
-        if label_clustering:
-            ctx.data.build_radius_index(scale)
+        ctx.data.build_radius_index(scale)
         h = 2 * scale
     else:
         ctx.data.build_radius_index(float(r))
         h = 2 * float(r)
-    allocation = effect == "allocation"
     if allocation:
-        g = Graph(
-            knn,
-            effect,
-            np.zeros(0),
-            any=ctx.data.pair_neighbour_any_totals(knn),
-            self_expected=ctx.data.self_any_expected(knn),
-        )
+        g = _graph(knn, effect, ctx.data.pair_neighbour_any_totals(knn), ctx.data.self_any_expected(knn))
     else:
-        g = Graph(
-            knn,
-            effect,
-            np.zeros(0),
-            totals=ctx.data.pair_neighbour_totals(knn),
-            sq=ctx.data.pair_neighbour_out_sq_totals(knn),
-        )
-    if label_clustering:
-        # psi of a `to` type is the median over every counted type (not only the requested pairs), so a pair's result
-        # does not depend on which other pairs were asked for
-        tos = list(dict.fromkeys(p[1] for p in pairs))
-        f = np.array([ctx.type_labels.index(a) for t in tos for a in ctx.type_labels], dtype=np.int32)
-        t = np.array([ctx.type_labels.index(t) for t in tos for _ in ctx.type_labels], dtype=np.int32)
-        g.psi = _core.label_clustering_factor(ctx.data, f, t, ctx.counts, T, knn, h, allocation)
+        g = _graph(knn, effect, ctx.data.pair_neighbour_totals(knn), ctx.data.pair_neighbour_out_sq_totals(knn))
+    # psi of a `to` type is the median over every counted type (not only the requested pairs), so a pair's result
+    # does not depend on which other pairs were asked for
+    tos = list(dict.fromkeys(p[1] for p in pairs))
+    f = np.array([ctx.type_labels.index(a) for t in tos for a in ctx.type_labels], dtype=np.int32)
+    t = np.array([ctx.type_labels.index(t) for t in tos for _ in ctx.type_labels], dtype=np.int32)
+    g.psi = _core.label_clustering_factor(ctx.data, f, t, ctx.counts, T, knn, h, allocation)
     return g
 
 

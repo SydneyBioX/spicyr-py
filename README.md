@@ -33,7 +33,9 @@ res.box_plot("T cells", "HR- Ki67+", interactive=True)  # proliferating tumour c
 
 For your own data, `spicy()` accepts an AnnData object, a SpatialData object or a pandas DataFrame. It looks for
 the columns `imageID` and `cellType` (name yours with `image_id=` and `cell_type=`) and takes coordinates from
-`obsm["spatial"]`, from the SpatialData annotation table, or from columns `x` and `y`. A pair `from` → `to` asks
+`obsm["spatial"]`, from the SpatialData annotation table, or from columns `x` and `y`. Give the path of a
+SpatialData store (`spicy("cells.zarr", ...)`) and it is read image by image without being loaded, so data sets of
+a billion cells fit in a laptop's memory. A pair `from` → `to` asks
 whether `to` cells are placed near `from` cells more than other cells are: the extra fraction of `to` cells with a
 `from` cell nearby (`effect="count"` gives the number of extra `from` cells around each `to` cell instead).
 
@@ -78,5 +80,5 @@ Questions and bug reports: [GitHub issues](https://github.com/SydneyBioX/spicyr-
 [ellis.patrick@sydney.edu.au](mailto:ellis.patrick@sydney.edu.au). For developers:
 [CONTRIBUTING](CONTRIBUTING.md).
 
-spicyr 1.99.13 is a development version. Authors: Ellis Patrick, Sadiq Dohadwalla, Elijah Willie and Nicolas Canete.
+spicyr 1.99.14 is a development version. Authors: Ellis Patrick, Sadiq Dohadwalla, Elijah Willie and Nicolas Canete.
 Licence: GPL (>= 2).

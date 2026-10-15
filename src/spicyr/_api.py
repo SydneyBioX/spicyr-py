@@ -9,8 +9,8 @@ import numpy as np
 import pandas as pd
 
 from . import _cell, _core
-from ._input import format_data
 from ._results import SpicyResults
+from ._source import cell_source
 
 
 def spicy(
@@ -34,6 +34,7 @@ def spicy(
     cores=1,
     survival=None,
     table_key="table",
+    images=None,
     **kwargs,
 ) -> SpicyResults:
     """Test whether the co-localisation of cell types differs between conditions, or is associated with survival.
@@ -68,7 +69,12 @@ def spicy(
     ----------
     cells
         A pandas DataFrame (one row per cell), an AnnData object (cells as observations; coordinates in
-        ``obsm["spatial"]`` or obs columns) or a SpatialData object (its annotation table ``table_key``).
+        ``obsm["spatial"]`` or obs columns), a SpatialData object (its annotation table ``table_key``), or the path
+        of a SpatialData store (``.zarr``) or of an AnnData zarr store. A store is read lazily: the image and
+        cell-type columns are loaded once as integer codes, the coordinates (``obsm["spatial"]``, or the obs columns
+        ``spatial_coords``) a batch of whole images at a time, and the condition, subject and covariates once per
+        image, so the data never need to fit in memory. Reading is fastest when the rows are grouped by image (as
+        spatialdata writes a table sorted by region); categorical image and cell-type columns keep the codes small.
     condition
         Column of the image-level condition (two or more groups).
     subject
@@ -102,6 +108,17 @@ def spicy(
         A survival outcome: ``(time_column, event_column)``, one value per patient (the R package's
         ``Surv(time, event)``). Leave ``condition`` empty. (Older form: ``condition=time_column,
         survival=event_column``.)
+    image_id, cell_type, spatial_coords
+        Columns of the image, the cell type and the coordinates. For SpatialData, images are the table's regions
+        (its region_key column) unless ``image_id`` names another column.
+    cores
+        Threads. Batches of whole images are read and summarised in parallel; results do not depend on it.
+    table_key
+        The annotation table of a SpatialData object or store.
+    images
+        A table with one row per image (index: the image IDs), for ``condition``, ``subject``, covariates or the
+        survival columns that are not columns of the cell table: a DataFrame, an AnnData object (its obs), or the
+        key of a table of the SpatialData object or store.
     """
     if "from" in kwargs:
         from_ = kwargs.pop("from")
@@ -127,9 +144,9 @@ def spicy(
         r = 50
     if k is not None:
         r = None
-    df = format_data(cells, image_id, cell_type, spatial_coords, table_key)
-    if subject is not None and subject not in df.columns:
-        raise ValueError("`subject` column not found.")
+    src = cell_source(cells, image_id, cell_type, spatial_coords, table_key)
+    if isinstance(images, str) and type(cells).__name__ == "SpatialData":
+        images = cells.tables[images].obs
     is_surv = survival is not None
     if is_surv and not isinstance(survival, str):
         if len(survival) != 2:
@@ -137,7 +154,8 @@ def spicy(
         condition, survival = survival[0], survival[1]
     if condition is None:
         raise ValueError("give `condition` (the column of the groups) or `survival` (time and event columns).")
-    types = list(dict.fromkeys(_cell.as_str(df["cellType"])))
+    ctx = _cell.cell_context(src, None if is_surv else condition, subject, images=images, survival=is_surv, ref=ref)
+    types = ctx.type_labels
     bad = [
         t
         for t in ([from_] if isinstance(from_, str) else (from_ or [])) + ([to] if isinstance(to, str) else (to or []))
@@ -149,17 +167,18 @@ def spicy(
     # cell within r; count: extra `from` cells within r of each `to` cell), beyond the `to` cells being a random subset
     # of the cells that are not `from` cells. This is the core's own (counted, centre) order, so pairs pass through.
     pairs = list(_cell.enumerate_pairs(from_, to, types))
+    covariates = None if covariates is None else ([covariates] if isinstance(covariates, str) else list(covariates))
+    miss = [c for c in covariates or [] if not ctx.has(c)]
+    if miss:
+        raise ValueError(f"covariates not found: {miss}")
+    pheno = ctx.pheno(
+        [c for c in (condition, subject, *(covariates or []), *([survival] if is_surv else [])) if c is not None]
+    )
     if is_surv:
-        df[".time"] = df[condition].astype(float)
-        df[".event"] = df[survival].astype(float)
-    ctx = _cell.cell_context(df, None if is_surv else condition, subject, ref=ref, survival=is_surv)
-    pheno = ctx.df.iloc[ctx.first].reset_index(drop=True)
+        pheno[".time"] = pheno[condition].astype(float)
+        pheno[".event"] = pheno[survival].astype(float)
     Z_extra, extra_names = None, []
     if covariates is not None:
-        covariates = [covariates] if isinstance(covariates, str) else list(covariates)
-        miss = [c for c in covariates if c not in pheno.columns]
-        if miss:
-            raise ValueError(f"covariates not found: {miss}")
         Z_extra, extra_names = _model_matrix(pheno, covariates)  # NaN rows where a covariate is missing
         Z_extra = Z_extra - np.nanmean(Z_extra, axis=0)
 
@@ -184,7 +203,7 @@ def spicy(
         per_r = []
         # several radii: one neighbour search at the largest radius gives every radius's graph
         graphs = (
-            _cell.cell_graphs_radii(ctx, radii, effect)
+            _cell.cell_graphs_radii(ctx, radii, effect, n_threads=cores)
             if len(radii) > 1
             else [
                 _cell.cell_graph(
