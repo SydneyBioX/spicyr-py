@@ -223,7 +223,8 @@ def cell_context(
                 raise ValueError(f"'{condition}' must be constant within each image.")
         li = {l: i for i, l in enumerate(levels)}
         ctx.levels = levels
-        ctx.image_group = np.array([li[c] for c in as_str(cv).to_numpy()], dtype=int)
+        # an image with a missing condition gets -1: the tests leave it out
+        ctx.image_group = np.array([li.get(c, -1) for c in as_str(cv).to_numpy()], dtype=int)
         if (pd.Series(ctx.image_group).groupby(ctx.image_unit).nunique() > 1).any():
             raise ValueError(f"each subject must belong to a single '{condition}' level.")
 
@@ -451,18 +452,19 @@ def _design(ctx, rows, f, adjust, Z_extra, extra_names):
     """The design of the main test.
 
     One indicator per condition, then the centred log share of the counted type (adjust) and the centred
-    covariates. Images with a missing covariate are left out. None when there is nothing to adjust for.
+    covariates. Images with a missing condition or covariate are left out, as the unadjusted test leaves out
+    images with a missing condition. None when there is nothing to adjust for.
     """
     cols, names = [], []
+    keep = rows["group"] >= 0 if "group" in rows else np.ones(len(rows["img"]), dtype=bool)
     if adjust:
         s = _share(ctx, rows, f)
-        if len(s) > 1 and np.var(s, ddof=1) > 0:
+        if keep.sum() > 1 and np.var(s[keep], ddof=1) > 0:
             cols.append(s[:, None])
             names.append("abundance")
-    keep = np.ones(len(rows["img"]), dtype=bool)
     if Z_extra is not None:
         ze = Z_extra[rows["img"], :]
-        keep = np.all(np.isfinite(ze), axis=1)
+        keep = keep & np.all(np.isfinite(ze), axis=1)
         cols.append(ze)
         names += list(extra_names)
     if not cols:

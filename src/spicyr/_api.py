@@ -414,7 +414,7 @@ def _results(res, ctx, pheno, condition, subject, survival, radii, k, effect="co
         survival=survival,
         radius_results=res.get("radius_table"),
         image_ids=list(ctx.image_labels),
-        condition=(None if survival else [ctx.levels[g] for g in ctx.image_group]),
+        condition=(None if survival else [ctx.levels[g] if g >= 0 else None for g in ctx.image_group]),
         subject=(None if subject is None else _cell.as_str(pheno[subject]).tolist()),
         pairwise_assoc=pa,
         image_weights=w,
