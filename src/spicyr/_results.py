@@ -431,9 +431,12 @@ class SpicyResults:
             if parts:
                 note = " (unadjusted test in the unadjusted_* columns)" if "unadjusted_p_adj" in t.columns else ""
                 lines.append(f"Adjusted for: {', '.join(parts)}{note}")
-            fallback = int(t["adjusted_for"].str.startswith("none (").sum())
+            novar = int((t["adjusted_for"] == "none (no_variation)").sum())
+            fallback = int(t["adjusted_for"].str.startswith("none (").sum()) - novar
             if fallback:
                 lines.append(f"{fallback} pairs could not be adjusted and are reported unadjusted (see adjusted_for)")
+            if novar:
+                lines.append(f'{novar} pairs have no variation (adjusted_for "none (no_variation)") and are not tested')
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
         if "unadjusted_p_adj" in t.columns:
             sig += f" ({int((t['unadjusted_p_adj'] < 0.05).sum())} without adjustment)"

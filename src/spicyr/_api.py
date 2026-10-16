@@ -303,7 +303,13 @@ def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, co
     )
     adjusted = adjust or Z_extra is not None
     names = None if Z_extra is None else list(extra_names)
-    tabs = [_pairs_table(x, k, from_, to, allocation, adjusted, names) for k in range(K)]
+    # the effect columns of a radius where no pair's design was fitted (e.g. none with variation): those of the first
+    # radius where one was, so that every radius has the same columns
+    ens = [_pairs_enames(x, k, adjusted, names) for k in range(K)]
+    en0 = next((e for e in ens if e is not None), None)
+    tabs = [
+        _pairs_table(x, k, from_, to, allocation, adjusted, names, en0 if ens[k] is None else ens[k]) for k in range(K)
+    ]
     fits = [
         {"from": from_[i], "to": to[i], "rows": x["rows"][i], "unadjusted": {"image_weight": x["image_weight"][i]}}
         for i in range(len(pairs))
@@ -334,10 +340,27 @@ def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, co
     return {"table": _cell.order_columns(tab), "fits": fits, "radius_table": long}
 
 
-def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names):
+def _added(ab, extra_names):
+    """The added columns of each adjusted fit (the abundance first), named as cell_pair_test() names its effects."""
+    extra = [] if extra_names is None else extra_names
+    return [(["abundance"] if a else []) + extra for a in ab]
+
+
+def _pairs_enames(x, k, adjusted, extra_names):
+    """The added columns of the pairs adjusted at radius k, as named in their fits; None when none was."""
+    s = np.flatnonzero(x["ok"][:, k] == 1)
+    if not len(s) or not adjusted:
+        return None
+    design = x["design"][s, k]
+    added = _added(x["abundance"][s, k] == 1, extra_names)
+    return list(dict.fromkeys(nm for j in np.flatnonzero(design == 1) for nm in added[j])) or None
+
+
+def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names, enames=None):
     """The table of one radius from the core's pair_tests (the columns and rows cell_table() gives for the same fits).
 
-    extra_names: the covariates' columns, None without covariates.
+    extra_names: the covariates' columns, None without covariates. enames: the effect columns (default: those of the
+    pairs adjusted at this radius).
     """
     s = np.flatnonzero(x["ok"][:, k] == 1)
     if not len(s):
@@ -363,9 +386,7 @@ def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names):
     if adjusted:
         K = x["ok"].shape[1]
         design, ab = at("design"), at("abundance") == 1
-        extra = [] if extra_names is None else extra_names
-        # the added columns of each adjusted fit (the abundance first), named as cell_pair_test() names its effects
-        added = [(["abundance"] if a else []) + extra for a in ab]
+        added = _added(ab, extra_names)
         label = [
             "+".join(
                 (["abundance"] if "abundance" in nm[:1] else []) + (["covariates"] if extra_names is not None else [])
@@ -376,7 +397,8 @@ def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names):
             label[j] if d == 1 else f"none ({x['design_reason'][i * K + k]})" if d == 2 else "none"
             for j, (i, d) in enumerate(zip(s, design, strict=True))
         ]
-        enames = list(dict.fromkeys(nm for j in np.flatnonzero(design == 1) for nm in added[j]))
+        if enames is None:
+            enames = _pairs_enames(x, k, adjusted, extra_names) or []
         for nm in enames:
             e = np.full(len(s), np.nan)
             ep = np.full(len(s), np.nan)
@@ -445,7 +467,8 @@ def _survival(
         m = len(ctx.unit_labels)
         u = _core.survival_test(rws, rws["unit"], m, M, time, ev, np.zeros(0))
         x = _cell._share(ctx, rws, f) if adjust else np.zeros(0)
-        shared = not (len(x) > 1 and np.var(x, ddof=1) > 0)
+        # the adjusted test only where the unadjusted one was done (not where the excess has no variation: no_variation)
+        shared = not (u["ok"] and len(x) > 1 and np.var(x, ddof=1) > 0)
         s = u if shared else _core.survival_test(rws, rws["unit"], m, M, time, ev, x)
         parts = ([] if shared else ["abundance"]) + ([] if covariates is None else ["covariates"])
         fits.append({"from": f, "to": t, "ok": s["ok"], "reason": s["reason"], "rows": rws, "surv": s})

@@ -527,6 +527,11 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
+    # no variation (the unadjusted test is 0 / 0): an adjusted design would only fit rounding noise; not tested
+    if not r["se"] > 0:
+        out["test"] = dict(r, p=np.nan)
+        out["adjusted_for"] = "none (no_variation)"
+        return out
     a = _design_tests(
         d["rows"],
         m,
@@ -570,8 +575,10 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
         return out
     Zg = (rows["group"][:, None] == np.arange(G)[None, :]).astype(float)
     u = _design_tests(rows, m, Zg, _contrasts(G, G), -1.0 if frailty else 0.0, hk)
+    # not of full rank, or no variation (the condition means fit the response exactly; the design test checks it, so no
+    # adjusted design is fitted then either)
     if not u[0]["ok"]:
-        out["reason"] = "design_not_full_rank"
+        out["reason"] = "no_variation" if u[0]["reason"] == "no_variation" else "design_not_full_rank"
         return out
     un = dict(zip(ctx.levels[1:], u, strict=True))
     out.update(ok=True, levels_test=un, unadjusted_levels=un, test={"coef_ref": u[0]["theta"][0], "tau2": u[0]["tau2"]})
