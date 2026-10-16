@@ -293,19 +293,25 @@ PYBIND11_MODULE(_core, m) {
   m.def("pt_two_sided", [](double t, double df) { return pt_two_sided(t, df); });
   m.def("norm_quantile", [](double p) { return norm_quantile(p); });
 
-  m.def("excess_image_rows", [](const DoubleArray& totals, const DoubleArray& sq, const DoubleArray& counts, int n_types,
-                                int from, int to, bool knn, const DoubleArray& psi) {
+  // image_group: per image (-1: a missing condition, no row and no part in the side), or None for every image
+  auto groups = [](const py::object& g) { return g.is_none() ? std::vector<int>() : vec<int>(g.cast<IntArray>()); };
+  m.def("excess_image_rows", [groups](const DoubleArray& totals, const DoubleArray& sq, const DoubleArray& counts,
+                                      int n_types, int from, int to, bool knn, const DoubleArray& psi,
+                                      const py::object& image_group) {
     int n_images = static_cast<int>(counts.size() / n_types);
     return rows_to(excess_image_rows(vec<double>(totals), vec<double>(sq), image_major(counts), n_types, n_images, from, to,
-                                     knn, vec<double>(psi)));
-  });
+                                     knn, vec<double>(psi), groups(image_group)));
+  }, py::arg("totals"), py::arg("sq"), py::arg("counts"), py::arg("n_types"), py::arg("from_"), py::arg("to"),
+     py::arg("knn"), py::arg("psi"), py::arg("image_group") = py::none());
 
-  m.def("allocation_image_rows", [](const DoubleArray& any_totals, const DoubleArray& self_expected, const DoubleArray& counts,
-                                    int n_types, int from, int to, const DoubleArray& psi) {
+  m.def("allocation_image_rows", [groups](const DoubleArray& any_totals, const DoubleArray& self_expected,
+                                          const DoubleArray& counts, int n_types, int from, int to, const DoubleArray& psi,
+                                          const py::object& image_group) {
     int n_images = static_cast<int>(counts.size() / n_types);
     return rows_to(allocation_image_rows(vec<double>(any_totals), vec<double>(self_expected), image_major(counts), n_types,
-                                         n_images, from, to, vec<double>(psi)));
-  });
+                                         n_images, from, to, vec<double>(psi), groups(image_group)));
+  }, py::arg("any_totals"), py::arg("self_expected"), py::arg("counts"), py::arg("n_types"), py::arg("from_"),
+     py::arg("to"), py::arg("psi"), py::arg("image_group") = py::none());
 
   m.def("image_heterogeneity_rows", [](const py::dict& rows, const IntArray& unit) {
     double tau2 = 0;
@@ -316,6 +322,17 @@ PYBIND11_MODULE(_core, m) {
   m.def("informative_units", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_groups) {
     return arr(informative_units(rows_from(rows), vec<int>(unit), vec<int>(group), n_groups));
   });
+  m.def("effective_units", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_groups,
+                              double tau2) {
+    return arr(effective_units(rows_from(rows), vec<int>(unit), vec<int>(group), n_groups, tau2));
+  });
+  m.def("test_rules", [](bool allocation) {
+    TestRules r = test_rules(allocation);
+    py::dict o;
+    o["pooled_dispersion"] = r.pooled_dispersion; o["min_effective_units"] = r.min_effective_units;
+    o["min_n_eff"] = kMinEffectiveUnits;
+    return o;
+  });
   m.def("label_clustering_factor", [](const Dataset& d, const IntArray& from, const IntArray& to, const DoubleArray& counts,
                                       int n_types, bool knn, double h, bool allocation) {
     int n_images = static_cast<int>(counts.size() / n_types);
@@ -324,16 +341,17 @@ PYBIND11_MODULE(_core, m) {
   });
 
   m.def("excess_test", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_units, bool frailty,
-                          const std::string& variance) {
+                          const std::string& variance, bool pooled_dispersion) {
     ExcessResult r = excess_test(rows_from(rows), vec<int>(unit), vec<int>(group), n_units, frailty,
-                                 variance == "hartung_knapp" ? Variance::HartungKnapp : Variance::CR2);
+                                 variance == "hartung_knapp" ? Variance::HartungKnapp : Variance::CR2, pooled_dispersion);
     py::dict o;
     o["ok"] = r.ok; o["reason"] = r.reason; o["coef_ref"] = r.coef_ref; o["coef_comp"] = r.coef_comp;
     o["difference"] = r.difference; o["se"] = r.se; o["df"] = r.df; o["p"] = r.p; o["tau2"] = r.tau2;
     o["influence"] = arr(r.influence); o["unit_summary"] = arr(r.unit_summary); o["unit_info"] = arr(r.unit_info);
-    o["image_weight"] = arr(r.image_weight);
+    o["image_weight"] = arr(r.image_weight); o["n_eff"] = arr(r.n_eff);
     return o;
-  });
+  }, py::arg("rows"), py::arg("unit"), py::arg("group"), py::arg("n_units"), py::arg("frailty"), py::arg("variance"),
+     py::arg("pooled_dispersion") = false);
 
   m.def("design_test", [](const py::dict& rows, const IntArray& unit, int n_units, const DoubleArray& Z,
                           const DoubleArray& contrast, double tau2) {
@@ -342,15 +360,17 @@ PYBIND11_MODULE(_core, m) {
   });
 
   m.def("design_tests", [](const py::dict& rows, const IntArray& unit, int n_units, const DoubleArray& Z,
-                           const DoubleArray& contrasts, int k, double tau2, bool hartung_knapp) {
-    // Z: row-major images x q; contrasts: row-major k x q
+                           const DoubleArray& contrasts, int k, double tau2, bool hartung_knapp, int n_groups) {
+    // Z: row-major images x q; contrasts: row-major k x q; n_groups: the pooled dispersion over the first n_groups
+    // columns (the condition indicators), 0 for CR2
     int q = static_cast<int>(contrasts.size() / k);
     std::vector<DesignResult> r = design_tests(rows_from(rows), vec<int>(unit), n_units, vec<double>(Z), q,
-                                               vec<double>(contrasts), k, tau2, hartung_knapp);
+                                               vec<double>(contrasts), k, tau2, hartung_knapp, n_groups);
     py::list out;
     for (const auto& d : r) out.append(design_dict(d));
     return out;
-  });
+  }, py::arg("rows"), py::arg("unit"), py::arg("n_units"), py::arg("Z"), py::arg("contrasts"), py::arg("k"),
+     py::arg("tau2"), py::arg("hartung_knapp") = false, py::arg("n_groups") = 0);
 
   m.def("availability_test", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_units,
                                 const DoubleArray& x, double tau2) {

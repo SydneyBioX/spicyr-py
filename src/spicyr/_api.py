@@ -50,7 +50,7 @@ def spicy(
     cells were moved next to ``from`` cells, the effect is f. For a pair that avoids it is (observed share - q) / q: if
     a fraction f of the ``to`` cells that would have a ``from`` cell nearby were moved away, the effect is -f. Either
     way it does not depend on how many ``from`` cells there are or how densely they are packed. The side is chosen
-    once per pair from all images, without the conditions, and is reported in the ``side`` column.
+    once per pair from all images with a condition, without the conditions, and is reported in the ``side`` column.
     ``effect="count"`` gives the number of extra ``from`` cells within ``r`` of each ``to`` cell
     instead; it also reflects how many ``from`` cells surround a ``to`` cell (depth of infiltration), but it grows
     with how densely the ``from`` cells are packed. Images are combined within patients (``subject``) and patients
@@ -70,6 +70,23 @@ def spicy(
     standard error would rest on the other condition alone. Its p-value is NaN (with adjustment, ``adjusted_for`` is
     ``"none (no_information)"``), and it is left out of the combination over radii. With more than two conditions, a
     pair where any condition has no informative patient is not tested.
+
+    The conditions share one dispersion. Each condition's CR2 variance is divided by its
+    model-based variance, the ratios are averaged over the conditions with their numbers of patients as weights, and
+    the model-based variance of the difference is multiplied by this average. The degrees of freedom are those of
+    CR2. A small condition's own spread does not set the standard error alone, which matters when the conditions are
+    of unequal size and the patients' effects are skewed. With adjustment, the ratios are those of the coefficient of
+    each condition in the adjusted design, and every coefficient's variance is scaled the same way.
+    ``variance="hartung_knapp"`` keeps its own variance.
+
+    A patient's weight within its condition grows with the information of its images, so one or two patients can
+    carry nearly all of a condition's weight. A radius where a condition has fewer than 3
+    effective patients (Kish's (sum w)^2 / sum w^2 of the patients' weights w) is not tested: its p-value is NaN (with
+    adjustment, ``adjusted_for`` is ``"none (few_effective_units)"``), and it is left out of the combination over
+    radii. With more than two conditions, a pair where any condition has fewer than 3 is not tested.
+
+    Images with a missing condition are left out of every step: the choice of the side, the between-image variance
+    and the tests.
 
     ``from`` is spelled ``from_`` because ``from`` is a Python keyword (``**{"from": ...}`` also works).
 
@@ -111,8 +128,8 @@ def spicy(
         reported as ``abundance_effect``. It does not separate more ``from`` cells from more densely packed ones,
         and it removes real effects when the share tracks the condition.
     variance
-        "cr2" (default: CR2 on Satterthwaite df) or "hartung_knapp" (the model-based variance, scaled by the Pearson
-        statistic when that exceeds its df and never below CR2, on m - 2 df). The variance used is in ``.variance``
+        "cr2" (default: CR2 on Satterthwaite df, with the dispersion shared by the conditions, see above) or "hartung_knapp" (the model-based variance, scaled by the Pearson statistic when that
+        exceeds its df and never below CR2, on m - 2 df). The variance used is in ``.variance``
         of the result.
     survival
         A survival outcome: ``(time_column, event_column)``, one value per patient (the R package's
@@ -519,7 +536,10 @@ def _survival(
 def _results(res, ctx, pheno, condition, subject, survival, radii, k, effect="count") -> SpicyResults:
     tab = res["table"]
     if tab is None:
-        raise ValueError("no pair could be tested (each condition needs at least two patients with both cell types).")
+        raise ValueError(
+            "no pair could be tested (each condition needs at least two patients with both cell types, "
+            "and at least 3 effective patients)."
+        )
     pa = _cell.cell_image_excess(res["fits"], ctx)
     w = _cell.cell_image_weight(res["fits"], ctx)
     return SpicyResults(

@@ -433,7 +433,8 @@ class SpicyResults:
                 lines.append(f"Adjusted for: {', '.join(parts)}{note}")
             novar = int((t["adjusted_for"] == "none (no_variation)").sum())
             noinfo = int((t["adjusted_for"] == "none (no_information)").sum())
-            fallback = int(t["adjusted_for"].str.startswith("none (").sum()) - novar - noinfo
+            few = int((t["adjusted_for"] == "none (few_effective_units)").sum())
+            fallback = int(t["adjusted_for"].str.startswith("none (").sum()) - novar - noinfo - few
             if fallback:
                 lines.append(f"{fallback} pairs could not be adjusted and are reported unadjusted (see adjusted_for)")
             if novar:
@@ -443,11 +444,17 @@ class SpicyResults:
                     f"{noinfo} pairs have a condition with no informative patient "
                     '(adjusted_for "none (no_information)") and are not tested'
                 )
+            if few:
+                lines.append(
+                    f"{few} pairs have a condition with fewer than 3 effective patients "
+                    '(adjusted_for "none (few_effective_units)") and are not tested'
+                )
         elif not self.survival:
             untested = int(t["p_value"].isna().sum())
             if untested:
                 lines.append(
-                    f"{untested} pairs are not tested (p_value NaN: no variation, or a condition with no informative patient)"
+                    f"{untested} pairs are not tested (p_value NaN: no variation, a condition with no informative "
+                    "patient, or one with fewer than 3 effective patients)"
                 )
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
         if "unadjusted_p_adj" in t.columns:

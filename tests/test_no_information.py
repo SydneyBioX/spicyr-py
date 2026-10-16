@@ -1,7 +1,7 @@
 """A radius where a condition has no informative patient: tumour -> T avoids, and at r = 4 no T cell of condition A
 has a tumour cell within r, so every image of A is at the bound -1 and A's CR2 variance would be exactly 0. The radius
-is not tested and is left out of the combination over radii; the count effect has no bound and is unaffected. The
-cells and spicyR's results are written by spicyR (noinfo_dev/make_noinfo_case.R, spicyR 1.99.27)."""
+is not tested and is left out of the combination over radii; the count effect has no bound and is tested. The
+cells and spicyR's results are written by spicyR (noinfo_dev/make_noinfo_case.R, spicyR 1.99.29)."""
 
 import json
 from pathlib import Path
@@ -108,12 +108,12 @@ def test_left_out_of_the_combination(combine, adjust):
 
 
 @pytest.mark.parametrize("r", [4.0, 4.8])
-def test_count_is_unaffected(r):
+def test_count_is_tested(r):
     ctx = _cell.cell_context(CELLS, "condition", None)
     g = _cell.cell_graph(ctx, [("tumour", "T")], r=r, label_clustering=False, effect="count")
     g.image_heterogeneity = True
     rows = _cell.cell_rows(ctx, g, "tumour", "T")
-    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2")
+    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", True)
     x = run(r=r, effect="count").cell_results
     assert x["p_value"].iloc[0] == u["p"] and np.isfinite(u["p"])
 

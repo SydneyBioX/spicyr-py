@@ -158,8 +158,16 @@ the `to` cells. P-values are adjusted across all pairs by the Benjamini–Hochbe
 res.top_pairs(8)
 ```
 
-The most significant pairs nearly all have `HR+ CK7-` tumour cells as the `from` type; we come back to them in
-[Tissue compartments](#tissue-compartments).
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# the text below and in "Tissue compartments" describes these pairs
+top = res.top_pairs(8)
+assert ((top["from"] == "HR+ CK7-") | (top["to"] == "HR+ CK7-")).sum() >= 5 and top["from"].iloc[0] == "HR+ CK7-"
+```
+
+Most of these eight pairs have `HR+ CK7-` tumour cells as the `from` or the `to` type, the most significant as the
+`from` type; we come back to them in [Tissue compartments](#tissue-compartments).
 
 The full results are in `res.cell_results`, a DataFrame with one row per pair:
 
@@ -258,8 +266,8 @@ The weights are in `res.image_weights`.
 
 ## Tissue compartments
 
-The most significant pairs have `HR+ CK7-` tumour cells as the `from` type. These cells make up about a quarter of
-the cells in a typical ER+ core and almost none in ER− cores. In ER+ tumours they make up much of the tumour tissue
+Many of the most significant pairs, the first among them, have `HR+ CK7-` tumour cells as the `from` type. These
+cells make up about a quarter of the cells in a typical ER+ core and almost none in ER− cores. In ER+ tumours they make up much of the tumour tissue
 and the other tumour cells sit among them, so far more of those cells have an `HR+ CK7-` cell nearby than if they
 had been placed at random among all the other cells, stroma included.
 
@@ -426,7 +434,7 @@ for i in range(5):
     adata.obs["shuffled"] = adata.obs["metabricId"].map(label).astype(str)
     s = spicyr.spicy(adata, condition="shuffled", subject="metabricId", r=25,
                      image_id="file_id", cell_type="description")
-    p = s.cell_results["p_value"]
+    p = s.cell_results["p_value"].dropna()  # the pairs tested
     rows += [(i, "p < 0.05", 100 * (p < 0.05).mean()), (i, "p < 0.01", 100 * (p < 0.01).mean())]
 shuffles = pd.DataFrame(rows, columns=["shuffle", "threshold", "percent"])
 shuffles.groupby("threshold")["percent"].mean()
@@ -475,19 +483,23 @@ Images from the same patient are combined, giving more weight to more informativ
 spread between each patient's images (DerSimonian and Laird), so one large image cannot outweigh the patient's other
 images. Each patient has its own true effect, which varies around its group's mean by an amount estimated
 from the data (a frailty, or random-effects, model). The difference between groups, adjusted for any covariates, is
-tested with a small-sample cluster-robust (CR2) variance on
-Satterthwaite degrees of freedom, with patients as the clusters. This is designed to keep false positives near the
-nominal rate even with modest numbers of patients. A paper describing the method is in preparation.
+tested on Satterthwaite degrees of freedom with patients as the clusters, using the small-sample cluster-robust (CR2)
+variance. The groups share one dispersion: the model-based variance is scaled by the ratio
+of each group's CR2 variance to its model-based variance, averaged over the groups, so a small group's own spread does
+not set the standard error alone. A radius where a group has fewer than three effective patients, because one or two
+patients carry nearly all of its weight, is not tested. This is designed to keep false positives near the nominal
+rate even with modest numbers of patients. A paper describing the method is in preparation.
 
 ## Small studies
 
 With fewer than about ten patients per group, expect few significant pairs, even when an effect is consistent across
-patients: a calibrated test cannot be confident with little information. Look at whether the patients agree in
+patients: a calibrated test cannot be confident with little information. A group needs at least three
+patients, and in practice a few more, since patients rarely carry equal weight. Look at whether the patients agree in
 direction with `box_plot()`.
 
 :::{note}
-`variance="hartung_knapp"` can give more power in very small studies. It assumes that patients vary about equally
-in both groups and can give too many small p-values for rare cell types, so it is not the default.
+`variance="hartung_knapp"` can give more power in very small studies, but it can give too many small p-values for rare
+cell types, so it is not the default.
 :::
 
 ## Very large data sets: SpatialData stores

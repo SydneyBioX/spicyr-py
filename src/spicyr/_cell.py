@@ -405,16 +405,18 @@ def cell_graph(
 def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     T = len(ctx.type_labels)
     fc, tc = ctx.type_labels.index(f), ctx.type_labels.index(t)
+    # images with a missing condition give no row: they play no part in the side, tau2_image or the test
+    ig = None if ctx.image_group is None else np.asarray(ctx.image_group, dtype=np.int32)
     if g.effect == "allocation":
-        rows = _core.allocation_image_rows(g.any, g.self_expected, ctx.counts, T, fc, tc, g.psi)
+        rows = _core.allocation_image_rows(g.any, g.self_expected, ctx.counts, T, fc, tc, g.psi, ig)
     else:
-        rows = _core.excess_image_rows(g.totals, g.sq, ctx.counts, T, fc, tc, g.knn, g.psi)
+        rows = _core.excess_image_rows(g.totals, g.sq, ctx.counts, T, fc, tc, g.knn, g.psi, ig)
     rows["unit"] = ctx.image_unit[rows["img"]].astype(np.int32)
     if ctx.image_group is not None:
         rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)
     side = None
     if g.effect == "allocation":
-        # the pair's side, chosen in the core from all images (attraction scales by 1 - q, avoidance by q)
+        # the pair's side, chosen in the core from the images (attraction scales by 1 - q, avoidance by q)
         side = "avoid" if float(np.sum(rows["O"] - rows["E"])) < 0 else "attract"
     # images within a patient: each row becomes its effect (O - E) / n with variance v / n^2 + tau2_image
     if g.image_heterogeneity and len(rows["O"]):
@@ -502,8 +504,17 @@ def _contrasts(G, q):
     return C
 
 
-def _design_tests(rows, m, Z, C, tau2, hk):
-    return _core.design_tests(rows, rows["unit"], m, Z, C, C.shape[0], tau2, hk)
+def _design_tests(rows, m, Z, C, tau2, hk, n_groups=0):
+    return _core.design_tests(rows, rows["unit"], m, Z, C, C.shape[0], tau2, hk, n_groups)
+
+
+def _rules(rows) -> dict:
+    """The rules of the condition test for these rows' effect (the core's test_rules).
+
+    Allocation (rows with a side), or the count effect: the pooled dispersion, and the minimum effective number of
+    patients per condition.
+    """
+    return _core.test_rules("side" in rows)
 
 
 def _no_information(rows, G) -> bool:
@@ -522,7 +533,8 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_
     if len(ctx.levels) > 2:
         return cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names)
     m = len(ctx.unit_labels)
-    r = _core.excess_test(rows, rows["unit"], rows["group"], m, frailty, variance)
+    rules = _rules(rows)
+    r = _core.excess_test(rows, rows["unit"], rows["group"], m, frailty, variance, rules["pooled_dispersion"])
     out = {
         "from": f,
         "to": t,
@@ -535,17 +547,22 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_
     }
     if not r["ok"]:
         return out
-    # allocation: a condition with no informative patient (every image at -1 or +1, the bounds of the fraction) has a
-    # CR2 variance of exactly 0; the radius is not tested (as the core's pair_tests)
-    noinfo = r["se"] > 0 and _no_information(rows, 2)
-    if noinfo:
+    # not tested (as the core's pair_tests): allocation, a condition with no informative patient (every image at -1 or
+    # +1, the bounds of the fraction; its CR2 variance is exactly 0); then a condition with fewer than 3 effective
+    # patients (its mean rests on one or two of them)
+    skip = None
+    if r["se"] > 0 and _no_information(rows, 2):
+        skip = "no_information"
+    elif rules["min_effective_units"] and r["se"] > 0 and min(r["n_eff"]) < rules["min_n_eff"]:
+        skip = "few_effective_units"
+    if skip is not None:
         out["test"] = dict(r, p=np.nan)
         out["unadjusted"] = out["test"]
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
-    if noinfo:
-        out["adjusted_for"] = "none (no_information)"
+    if skip is not None:
+        out["adjusted_for"] = f"none ({skip})"
         return out
     # no variation (the unadjusted test is 0 / 0): an adjusted design would only fit rounding noise; not tested
     if not r["se"] > 0:
@@ -559,6 +576,7 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_
         _contrasts(2, d["Z"].shape[1]),
         _design_tau2(d, 2, frailty, r["tau2"]),
         variance == "hartung_knapp",
+        2 if rules["pooled_dispersion"] else 0,
     )
     # a design that is not of full rank (e.g. a covariate confounded with the condition): the unadjusted test
     if not a[0]["ok"]:
@@ -588,6 +606,8 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
     G = len(ctx.levels)
     m = len(ctx.unit_labels)
     hk = variance == "hartung_knapp"
+    rules = _rules(rows)
+    ng = G if rules["pooled_dispersion"] else 0
     out = {"from": f, "to": t, "ok": False, "rows": rows, "levels": ctx.levels, "adjusted_for": "none"}
     per_level = pd.Series(rows["unit"]).groupby(rows["group"]).nunique().reindex(range(G))
     if per_level.isna().any() or (per_level < 2).any():
@@ -595,7 +615,7 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
         return out
     rg = _subset_rows(rows, rows["group"] >= 0)  # images with a missing condition are left out
     Zg = (rg["group"][:, None] == np.arange(G)[None, :]).astype(float)
-    u = _design_tests(rg, m, Zg, _contrasts(G, G), -1.0 if frailty else 0.0, hk)
+    u = _design_tests(rg, m, Zg, _contrasts(G, G), -1.0 if frailty else 0.0, hk, ng)
     # not of full rank, or no variation (the condition means fit the response exactly; the design test checks it, so no
     # adjusted design is fitted then either)
     if not u[0]["ok"]:
@@ -604,13 +624,18 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
     if _no_information(rows, G):
         out["reason"] = "no_information"
         return out
+    if rules["min_effective_units"]:
+        n_eff = np.asarray(_core.effective_units(rg, rg["unit"], rg["group"], G, u[0]["tau2"]))
+        if (n_eff < rules["min_n_eff"]).any():
+            out["reason"] = "few_effective_units"
+            return out
     un = dict(zip(ctx.levels[1:], u, strict=True))
     out.update(ok=True, levels_test=un, unadjusted_levels=un, test={"coef_ref": u[0]["theta"][0], "tau2": u[0]["tau2"]})
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
     a = _design_tests(
-        d["rows"], m, d["Z"], _contrasts(G, d["Z"].shape[1]), _design_tau2(d, G, frailty, u[0]["tau2"]), hk
+        d["rows"], m, d["Z"], _contrasts(G, d["Z"].shape[1]), _design_tau2(d, G, frailty, u[0]["tau2"]), hk, ng
     )
     if not a[0]["ok"]:
         out["adjusted_for"] = f"none ({a[0]['reason']})"
