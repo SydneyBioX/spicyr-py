@@ -35,7 +35,7 @@ For your own data, `spicy()` accepts an AnnData object, a SpatialData object or 
 the columns `imageID` and `cellType` (name yours with `image_id=` and `cell_type=`) and takes coordinates from
 `obsm["spatial"]`, from the SpatialData annotation table, or from columns `x` and `y`. Give the path of a
 SpatialData store (`spicy("cells.zarr", ...)`) and it is read image by image without being loaded, so data sets of
-a billion cells fit in a laptop's memory. A pair `from` → `to` asks
+a billion cells fit in a laptop's memory; `write_cell_store()` writes a DataFrame of cells as such a store. A pair `from` → `to` asks
 whether `to` cells are placed near `from` cells more than other cells are: the extra fraction of `to` cells with a
 `from` cell nearby (`effect="count"` gives the number of extra `from` cells around each `to` cell instead).
 
@@ -58,7 +58,7 @@ pip install "spicyr[plot,data,anndata] @ git+https://github.com/SydneyBioX/spicy
 ```
 
 Until spicyr is on PyPI this builds from source and needs a C++17 compiler. `plot` adds matplotlib and plotly,
-`data` the example data sets, `anndata` and `spatialdata` those inputs.
+`data` the example data sets, `anndata` and `spatialdata` those inputs, `store` zarr for writing a store.
 
 ## Learn more
 

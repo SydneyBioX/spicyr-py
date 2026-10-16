@@ -498,33 +498,35 @@ image, so spicyr loads the image and cell-type columns once as integer codes and
 whole images at a time. Memory then depends on the size of an image and on the number of threads (`cores`), not on
 the size of the study, and the results are the same as for the same cells in memory.
 
-To make a small store, we write 20 cores of each ER group as an AnnData Zarr store, the format of each table of a
-SpatialData store. The cell table keeps the core, the cell type and the coordinates (`obsm["spatial"]`); a
-DataFrame holds one row per core, with the patient and ER status.
+To make a small store, we write 20 cores of each ER group with `write_cell_store()`. It needs a DataFrame (or an
+AnnData object) with one row per cell; the image column becomes the table's region key and the coordinates its
+`obsm` array `"spatial"`. A second table holds one row per core, with the patient and ER status.
 
 ```{code-cell} ipython3
-:tags: [remove-stderr]
-
 import tempfile
 from pathlib import Path
-
-import anndata as ad
 
 some_cores = [c for g in ["ER-", "ER+"] for c in sorted(adata.obs.loc[adata.obs["ER"] == g, "file_id"].unique())[:20]]
 small = adata[adata.obs["file_id"].isin(some_cores)]
 small = small[np.argsort(small.obs["file_id"].to_numpy(), kind="stable")].copy()  # the rows of each core together
 core_info = small.obs.drop_duplicates("file_id").set_index("file_id")[["metabricId", "ER"]]
+xy = small.obsm["spatial"]
 path = Path(tempfile.mkdtemp()) / "metabric.zarr"
-ad.AnnData(obs=small.obs[["file_id", "description"]], obsm={"spatial": small.obsm["spatial"]}).write_zarr(path)
+spicyr.write_cell_store(small.obs[["file_id", "description"]].assign(x=xy[:, 0], y=xy[:, 1]), path,
+                        image_id="file_id", image_info=core_info)
 print(small.n_obs, "cells of", len(core_info), "cores")
+sorted(p.name for p in (path / "tables").iterdir() if p.is_dir())
 ```
 
-`spicy()` reads the store with the arguments used above. The condition and the patient are not columns of the cell
-table, so `image_info` gives them.
+The store holds the cells of the 40 cores in a cell table, and a table of the cores called `"images"`.
+
+`spicy()` reads the store with the arguments used above. The image column defaults to the table's region key and
+the coordinates to `obsm["spatial"]`. The condition and the patient are not columns of the cell table, so
+`image_info` names the table that holds them.
 
 ```{code-cell} ipython3
-res_store = spicyr.spicy(str(path), condition="ER", subject="metabricId", r=25, image_id="file_id",
-                         cell_type="description", image_info=core_info)
+res_store = spicyr.spicy(str(path), condition="ER", subject="metabricId", r=25, cell_type="description",
+                         image_info="images")
 ```
 
 The result is that of the same cells in memory:
@@ -536,14 +538,14 @@ pd.testing.assert_frame_equal(res_store.cell_results, res_memory.cell_results, c
 res_store.cell_results.equals(res_memory.cell_results)
 ```
 
-Every estimate, standard error and p-value is identical, not just close. A SpatialData store, or a SpatialData object
-read from one with the spatialdata package, is analysed in the same way:
+Every estimate, standard error and p-value is identical, not just close. The spatialdata package reads the same
+store as a SpatialData object, which `spicy()` analyses in the same way:
 
 ```python
 import spatialdata as sd
 
-sdata = sd.read_zarr("cells.zarr")
-res = spicyr.spicy(sdata, condition="ER", subject="metabricId", cell_type="description", image_info="images")
+sdata = sd.read_zarr(path)
+res = spicyr.spicy(sdata, condition="ER", subject="metabricId", r=25, cell_type="description", image_info="images")
 ```
 
 A few arguments matter for stores. `table_key` chooses the cell table of a SpatialData store or object (by default
@@ -582,6 +584,6 @@ import importlib.metadata as md
 import platform
 
 print("Python", platform.python_version())
-for p in ["spicyr", "numpy", "pandas", "anndata", "matplotlib", "plotly"]:
+for p in ["spicyr", "numpy", "pandas", "anndata", "zarr", "matplotlib", "plotly"]:
     print(p, md.version(p))
 ```

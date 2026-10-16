@@ -6,6 +6,12 @@
 .. autofunction:: spicyr.spicy
 ```
 
+## Writing a store
+
+```{eval-rst}
+.. autofunction:: spicyr.write_cell_store
+```
+
 ## Results
 
 ```{eval-rst}
