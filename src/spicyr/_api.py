@@ -85,7 +85,9 @@ def spicy(
         ``<column>_p_value`` (one column per level after the first for a categorical covariate).
     r
         Radius, or several radii combined by ``combine`` ("maxT", up to 6 radii; "davies", Davies' bound for the
-        same maximum, for many radii; or "cauchy"). Default 50.
+        same maximum, for many radii; or "cauchy"). Default 50. The max-T p-value is the multivariate normal
+        probability of the largest absolute z, computed by the quasi-Monte Carlo method of Genz and Bretz with an
+        absolute error of about 1e-4 (by quadrature for two radii); the same inputs always give the same value.
     from_, to
         Cell types to test (all ordered pairs by default).
     method

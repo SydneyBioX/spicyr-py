@@ -88,3 +88,17 @@ def test_adjusted_exactly_as_r(name):
         for col in ("p_value", "excess_difference", "se", "unadjusted_p_value"):
             if f"{col}_r" in m:
                 equal(m[f"{col}_py"].to_numpy(float), m[f"{col}_r"].to_numpy(float), f"{name}: radii {col}")
+
+
+def test_max_t_quasi_monte_carlo_is_deterministic_and_near_the_quadrature():
+    """maxT's probability (Genz-Bretz quasi-Monte Carlo, abs. error 1e-4) repeats exactly and agrees with the quadrature."""
+    from spicyr import _core
+
+    for K, rho, cv in [(3, 0.6, 2.2), (4, 0.9, 2.8), (6, 0.5, 3.1)]:
+        R = rho ** np.abs(np.subtract.outer(np.arange(K), np.arange(K)))
+        lo, hi = np.full(K, -cv), np.full(K, cv)
+        p = _core.mvn_outside(lo, hi, R.ravel())
+        assert _core.mvn_outside(lo, hi, R.ravel()) == p
+        q, err, _ = _core.mvn_outside_qmc(lo, hi, R.ravel())
+        assert q == p and err < 1e-4
+        assert abs(p - _core.mvn_outside_quadrature(lo, hi, R.ravel())) < 2e-4

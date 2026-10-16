@@ -394,4 +394,15 @@ PYBIND11_MODULE(_core, m) {
   m.def("mvn_outside", [](const DoubleArray& lower, const DoubleArray& upper, const DoubleArray& R) {
     return mvn_outside(vec<double>(lower), vec<double>(upper), vec<double>(R), static_cast<int>(lower.size()));
   });
+
+  m.def("mvn_outside_qmc", [](const DoubleArray& lower, const DoubleArray& upper, const DoubleArray& R, double abseps,
+                              long max_points) {
+    MvnResult r = mvn_outside_qmc(vec<double>(lower), vec<double>(upper), vec<double>(R), static_cast<int>(lower.size()),
+                                  abseps, max_points);
+    return py::make_tuple(r.p, r.error, r.points);
+  }, py::arg("lower"), py::arg("upper"), py::arg("R"), py::arg("abseps") = 1e-4, py::arg("max_points") = 100000);
+
+  m.def("mvn_outside_quadrature", [](const DoubleArray& lower, const DoubleArray& upper, const DoubleArray& R) {
+    return mvn_outside_quadrature(vec<double>(lower), vec<double>(upper), vec<double>(R), static_cast<int>(lower.size()));
+  });
 }
