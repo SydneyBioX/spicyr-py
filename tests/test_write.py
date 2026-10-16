@@ -24,6 +24,15 @@ def same(a, b):
         np.testing.assert_array_equal(a.pairwise_assoc[k], b.pairwise_assoc[k])
 
 
+def same_obs(read, obs):
+    """Equal frames; strings compared as Python objects (anndata reads them as object or as pandas strings)."""
+
+    def norm(d):
+        return d.apply(lambda c: c.astype(object) if pd.api.types.is_string_dtype(c.dtype) else c)
+
+    pd.testing.assert_frame_equal(norm(read), norm(obs), check_exact=True)
+
+
 def read_table(path, key="table"):
     return ad.io.read_elem(zarr.open_group(str(path), mode="r")["tables"][key])
 
@@ -56,14 +65,14 @@ def test_layout_and_round_trip(tmp_path):
     path = spicyr.write_cell_store(cells, tmp_path / "cells.zarr", image_info=info, chunk_rows=700)
     t = read_table(path)
     obs = cells.drop(columns=["x", "y"]).set_axis(cells.index.astype(str))
-    pd.testing.assert_frame_equal(t.obs.drop(columns="instance_id"), obs, check_exact=True)
+    same_obs(t.obs.drop(columns="instance_id"), obs)
     np.testing.assert_array_equal(t.obs["instance_id"], np.arange(n))
     np.testing.assert_array_equal(t.obsm["spatial"], cells[["x", "y"]].to_numpy())
     assert t.n_vars == 0
     sa = t.uns["spatialdata_attrs"]
     assert sa["region_key"] == "imageID" and sa["instance_key"] == "instance_id"
     assert list(sa["region"]) == list(dict.fromkeys(CELLS["imageID"]))
-    pd.testing.assert_frame_equal(read_table(path, "images").obs, info.set_axis(info.index.astype(str).rename(None)))
+    same_obs(read_table(path, "images").obs, info.set_axis(info.index.astype(str).rename(None)))
     root = zarr.open_group(str(path), mode="r")
     attrs = dict(root["tables/table"].attrs)
     assert attrs["spatialdata-encoding-type"] == "ngff:regions_table" and attrs["region_key"] == "imageID"
@@ -98,7 +107,7 @@ def test_spatialdata_reads_the_store(tmp_path):
     # the region key is categorical, with the images in order of first appearance
     images = pd.Categorical(cells["imageID"], categories=list(dict.fromkeys(cells["imageID"])))
     obs = cells.drop(columns=["x", "y"]).assign(imageID=images).set_axis(cells.index.astype(str))
-    pd.testing.assert_frame_equal(t.obs.drop(columns="instance_id"), obs, check_exact=True)
+    same_obs(t.obs.drop(columns="instance_id"), obs)
     np.testing.assert_array_equal(t.obsm["spatial"], cells[["x", "y"]].to_numpy())
     same(spicyr.spicy(sdata, **ARGS), spicyr.spicy(cells, **ARGS))
 

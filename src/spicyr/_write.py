@@ -110,19 +110,14 @@ class _Writer:
             codes = col.array.codes  # the stored codes, not a copy
             self.rows(g, "codes", n, codes.dtype, lambda a, b: codes[a:b])
             return
-        if isinstance(dtype, pd.BooleanDtype | pd.StringDtype) or (
+        if isinstance(dtype, pd.StringDtype) or (isinstance(dtype, np.dtype) and dtype.kind == "O"):
+            self._strings_column(parent, name, col, n)
+            return
+        if isinstance(dtype, pd.BooleanDtype) or (
             isinstance(dtype, pd.api.extensions.ExtensionDtype) and pd.api.types.is_integer_dtype(dtype)
         ):
             arr = col.array
-            if isinstance(dtype, pd.StringDtype):
-                kind, vtype, fill, enc, extra = (
-                    "nullable-string-array",
-                    str,
-                    "",
-                    ("string-array", "0.2.0"),
-                    {"na-value": "NA"},
-                )
-            elif isinstance(dtype, pd.BooleanDtype):
+            if isinstance(dtype, pd.BooleanDtype):
                 kind, vtype, fill, enc, extra = "nullable-boolean", np.bool_, False, ("array", "0.2.0"), {}
             else:
                 kind, vtype, fill, enc, extra = "nullable-integer", dtype.numpy_dtype, 0, ("array", "0.2.0"), {}
@@ -132,22 +127,25 @@ class _Writer:
             v = col.to_numpy()
             self.rows(parent, name, n, v.dtype, lambda a, b: v[a:b])
             return
-        if dtype.kind == "O":
-            v = col.to_numpy()
-            na = False
-            for a, b in _chunks(n, self.ch):
-                s = v[a:b]
-                if pd.api.types.infer_dtype(s, skipna=True) not in ("string", "empty"):
-                    raise ValueError(f"column '{name}' holds values that are not strings, numbers or logical.")
-                na = na or bool(pd.isna(s).any())
-            if not na:
-                self.rows(parent, name, n, str, lambda a, b: v[a:b], encoding=("string-array", "0.2.0"))
-            else:
-                self._nullable(
-                    parent, name, n, v, "nullable-string-array", str, "", ("string-array", "0.2.0"), {"na-value": "NA"}
-                )
-            return
         raise ValueError(f"column '{name}' is not categorical, strings, numbers or logical (its type is {dtype}).")
+
+    def _strings_column(self, parent, name, col, n):
+        """Strings: a string array, or a nullable string array when some are missing."""
+        v = col.array if isinstance(col.dtype, pd.StringDtype) else col.to_numpy()
+        na = False
+        for a, b in _chunks(n, self.ch):
+            s = v[a:b]
+            if pd.api.types.infer_dtype(s, skipna=True) not in ("string", "empty"):
+                raise ValueError(f"column '{name}' holds values that are not strings, numbers or logical.")
+            na = na or bool(pd.isna(s).any())
+        if not na:
+            self.rows(
+                parent, name, n, str, lambda a, b: np.asarray(v[a:b], dtype=object), encoding=("string-array", "0.2.0")
+            )
+        else:
+            self._nullable(
+                parent, name, n, v, "nullable-string-array", str, "", ("string-array", "0.2.0"), {"na-value": "NA"}
+            )
 
     def region_column(self, parent, name, col, n, regions):
         """The image column as a categorical whose categories are the regions (SpatialData's region key must be one)."""
