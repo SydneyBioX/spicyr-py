@@ -225,9 +225,8 @@ def spicy(
                 )
             ]
         )
-        adjusted = adjust_abundance or covariates is not None
-        if len(ctx.levels) > 2 or adjusted:
-            res = _pair_by_pair(ctx, graphs, pairs, variance, adjust_abundance, Z_extra, extra_names, radii, combine)
+        if len(ctx.levels) > 2:
+            res = _levels(ctx, graphs[0], pairs, variance, adjust_abundance, Z_extra, extra_names)
         else:
             res = _pairs(ctx, graphs, pairs, variance, adjust_abundance, Z_extra, extra_names, radii, combine, cores)
     out = _results(res, ctx, pheno, condition, subject, is_surv, radii, k, effect)
@@ -256,71 +255,11 @@ def _model_matrix(pheno, covariates):
     return np.column_stack(cols), names
 
 
-def _pair_by_pair(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine):
-    """More than two conditions, or a design to adjust for: each pair's test (and design) in turn, then the tables."""
-    per_r = []
-    for g in graphs:
-        g.image_heterogeneity = True
-        per_r.append(
-            [_cell.cell_pair_test(ctx, g, p[0], p[1], True, variance, adjust, Z_extra, extra_names) for p in pairs]
-        )
-    return _combine(per_r, radii, ctx, adjust or Z_extra is not None, combine)
-
-
-def _combine(per_r, radii, ctx, adjusted, combine):
-    """Several radii: per-radius tables, and one row per pair with the combined p-value.
-
-    The p-value is combined for the main test and, when adjusted, for the unadjusted test. The other columns are
-    those of the radius chosen by max-T.
-    """
-    tabs = [_cell.cell_table(fs, ctx, adjusted) for fs in per_r]
-    if len(radii) == 1:
-        return {"table": tabs[0], "fits": per_r[0]}
-    long = pd.concat([t.assign(r=rr) for t, rr in zip(tabs, radii, strict=True) if t is not None])
-    long = long[["r"] + [c for c in long.columns if c != "r"]]
-    keys = long[["from", "to"]].drop_duplicates()
-
-    def comb(tests):
-        ok = [i for i, z in enumerate(tests) if z is not None]
-        if not ok:
-            return None
-        # as R: a zero standard error gives an infinite (or NaN) t, not an error
-        with np.errstate(divide="ignore", invalid="ignore"):
-            tt = np.array([tests[i]["difference"] for i in ok], float) / np.array([tests[i]["se"] for i in ok], float)
-        df_ = np.array([tests[i]["df"] for i in ok])
-        pv = np.array([tests[i]["p"] for i in ok])
-        if combine in ("maxT", "davies"):
-            fun = _core.max_t if combine == "maxT" else _core.davies_max
-            p, best = fun([list(tests[i]["influence"]) for i in ok], tt, df_)
-        else:
-            best = int(np.argmin(pv))
-            p = _core.cauchy_combine(pv)
-        return ok[best], p, pv[best]
-
-    rows = []
-    for f, t in keys.itertuples(index=False):
-        fit_at = []
-        for fs in per_r:
-            o = next(z for z in fs if z["from"] == f and z["to"] == t)
-            fit_at.append(o if o["ok"] else None)
-        c = comb([None if o is None else o["test"] for o in fit_at])
-        if c is None:
-            continue
-        best, p, p_best = c
-        row = long[(long["from"] == f) & (long["to"] == t) & (long["r"] == radii[best])].iloc[0].to_dict()
-        row.update(p_value=p, p_value_best_radius=p_best)
-        if adjusted:
-            u = comb([None if o is None else o["unadjusted"] for o in fit_at])
-            row["unadjusted_p_value"] = np.nan if u is None else u[1]
-        rows.append(row)
-    tab = pd.DataFrame(rows)
-    tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
-    if adjusted:
-        tab["unadjusted_p_adj"] = _cell.p_adjust_bh(tab["unadjusted_p_value"])
-    tab = tab.drop(columns=[c for c in ("unadjusted_difference", "unadjusted_se", "unadjusted_df") if c in tab.columns])
-    tab.index = tab["from"] + "__" + tab["to"]
-    mid = int(np.argmin(np.abs(np.array(radii) - np.median(radii))))
-    return {"table": _cell.order_columns(tab), "fits": per_r[mid], "radius_table": long}
+def _levels(ctx, g, pairs, variance, adjust, Z_extra, extra_names):
+    """More than two conditions (one radius): each pair's design in turn, then the table."""
+    g.image_heterogeneity = True
+    fits = [_cell.cell_pair_test(ctx, g, p[0], p[1], True, variance, adjust, Z_extra, extra_names) for p in pairs]
+    return {"table": _cell.cell_table(fits, ctx, adjust or Z_extra is not None), "fits": fits}
 
 
 def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine, n_threads=1):

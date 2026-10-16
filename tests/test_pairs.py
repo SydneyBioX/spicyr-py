@@ -1,5 +1,7 @@
-"""Every pair at every radius in one core call (pair_tests) against each pair's test in turn (cell_pair_test)."""
+"""Every pair at every radius in one core call (pair_tests): equal to each pair's test in turn (cell_pair_test), and
+with a design to adjust for, exactly spicyR's results (tests/shared_cases/exact_*, written by make_exact_cases.R)."""
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -7,37 +9,21 @@ import pandas as pd
 import pytest
 
 import spicyr
-from spicyr import _api
+from spicyr import _api, _cell
 
-CELLS = pd.read_csv(Path(__file__).parent / "shared_cases" / "cells.csv")
+HERE = Path(__file__).parent / "shared_cases"
+CELLS = pd.read_csv(HERE / "cells.csv")
+EXACT = json.loads((HERE / "exact_cases.json").read_text())
+R_TO_PY = {"from": "from_", "adjustAbundance": "adjust_abundance"}
 BASE = {"condition": "condition", "subject": "patient"}
 
 
-def pair_by_pair(monkeypatch):
-    def run(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine, n_threads=1):
-        return _api._pair_by_pair(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine)
-
-    monkeypatch.setattr(_api, "_pairs", run)
-
-
-def in_one_call(monkeypatch):
-    def run(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine):
-        return _api._pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine, 2)
-
-    monkeypatch.setattr(_api, "_pair_by_pair", run)
-
-
-def same(a, b):
-    pd.testing.assert_frame_equal(a.cell_results, b.cell_results, check_exact=True)
-    if a.radius_results is None:
-        assert b.radius_results is None
-    else:
-        pd.testing.assert_frame_equal(a.radius_results, b.radius_results, check_exact=True)
-    for d in ("pairwise_assoc", "image_weights"):
-        x, y = getattr(a, d), getattr(b, d)
-        assert list(x) == list(y)
-        for k in x:
-            np.testing.assert_array_equal(x[k], y[k])
+def each_pair(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine, n_threads=1):
+    """One radius: cell_pair_test for each pair, then cell_table."""
+    g = graphs[0]
+    g.image_heterogeneity = True
+    fits = [_cell.cell_pair_test(ctx, g, f, t, True, variance, adjust, Z_extra, extra_names) for f, t in pairs]
+    return {"table": _cell.cell_table(fits, ctx, adjust or Z_extra is not None), "fits": fits}
 
 
 @pytest.mark.parametrize(
@@ -46,45 +32,49 @@ def same(a, b):
         {"r": 30},
         {"r": 30, "effect": "count"},
         {"k": 8},
-        {"r": [10, 20, 30, 40], "variance": "hartung_knapp"},
-        {"r": [10, 20, 30, 40], "effect": "count"},
-        {"r": [5, 10, 15, 20, 25, 30, 35, 40], "combine": "davies"},
-        {"r": [10, 20, 30], "combine": "cauchy", "from_": ["T", "B"], "to": "tumour", "cores": 3},
+        {"r": 20, "variance": "hartung_knapp", "cores": 3},
+        {"r": 30, "from_": ["T", "B"], "to": "tumour"},
     ],
 )
 def test_identical_to_each_pair_in_turn(monkeypatch, args):
     args = {**BASE, **args}
     new = spicyr.spicy(CELLS, **args)
     with monkeypatch.context() as m:
-        pair_by_pair(m)
+        m.setattr(_api, "_pairs", each_pair)
         old = spicyr.spicy(CELLS, **args)
-    same(new, old)
+    pd.testing.assert_frame_equal(new.cell_results, old.cell_results, check_exact=True)
+    for d in ("pairwise_assoc", "image_weights"):
+        x, y = getattr(new, d), getattr(old, d)
+        assert list(x) == list(y)
+        for k in x:
+            np.testing.assert_array_equal(x[k], y[k])
 
 
-@pytest.mark.parametrize(
-    "args",
-    [
-        {"r": 30, "covariates": ["age"], "adjust_abundance": True},
-        {"r": 30, "adjust_abundance": True, "effect": "count"},
-        {"r": [10, 20, 30], "covariates": ["age_na", "batch"]},
-        {"r": [10, 20, 30], "combine": "cauchy", "adjust_abundance": True},
-    ],
-)
-def test_adjusted_design_in_the_core(monkeypatch, args):
-    # the core centres the design's columns with a long double sum (as R's colMeans), numpy pairwise: the same
-    # tables up to rounding
-    args = {**BASE, **args}
-    old = spicyr.spicy(CELLS, **args)
-    with monkeypatch.context() as m:
-        in_one_call(m)
-        new = spicyr.spicy(CELLS, **args)
-    a, b = old.cell_results, new.cell_results
-    assert list(a.columns) == list(b.columns) and list(a.index) == list(b.index)
-    assert "adjusted_for" in a.columns
-    for c in a.columns:
-        if a[c].dtype.kind == "f":
-            np.testing.assert_allclose(b[c], a[c], rtol=1e-9, atol=1e-12)
+def full(path):
+    """An R table written at 17 significant digits, read back exactly."""
+    return pd.read_csv(path, float_precision="round_trip", keep_default_na=False, na_values=["NA"])
+
+
+@pytest.mark.parametrize("name", sorted(EXACT))
+def test_adjusted_exactly_as_r(name):
+    kw = {R_TO_PY.get(k, k): (v if not isinstance(v, list) or len(v) > 1 else v[0]) for k, v in EXACT[name].items()}
+    res = spicyr.spicy(CELLS, **kw)
+    exp = full(HERE / f"exact_{name}.csv").set_index("Unnamed: 0")
+    got = res.cell_results
+    assert sorted(got.index) == sorted(exp.index)
+    got = got.loc[exp.index]
+    assert list(got.columns) == list(exp.columns)
+    for col in exp.columns:
+        if exp[col].dtype.kind in "fi":
+            np.testing.assert_array_equal(got[col].to_numpy(float), exp[col].to_numpy(float), err_msg=f"{name}: {col}")
         else:
-            assert a[c].tolist() == b[c].tolist()
-    for k in old.image_weights:
-        np.testing.assert_allclose(new.image_weights[k], old.image_weights[k], rtol=1e-9, atol=1e-12)
+            assert got[col].astype(str).tolist() == exp[col].astype(str).tolist(), f"{name}: {col}"
+    radii = HERE / f"exact_{name}_radii.csv"
+    if radii.exists():
+        er = full(radii)
+        gr = res.radius_results.reset_index(drop=True)
+        m = er.merge(gr, on=["r", "from", "to"], suffixes=("_r", "_py"))
+        assert len(m) == len(er) == len(gr)
+        for col in ("p_value", "excess_difference", "se", "unadjusted_p_value"):
+            if f"{col}_r" in m:
+                np.testing.assert_array_equal(m[f"{col}_py"], m[f"{col}_r"], err_msg=f"{name}: radii {col}")

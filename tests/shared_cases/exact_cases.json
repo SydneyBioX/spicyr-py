@@ -1,0 +1,66 @@
+{
+  "adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "adjustAbundance": true
+  },
+  "count_adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "effect": "count",
+    "adjustAbundance": true
+  },
+  "covariates": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "covariates": ["age", "batch"],
+    "from": "tumour"
+  },
+  "covariates_missing": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "covariates": ["age_na", "batch"],
+    "adjustAbundance": true
+  },
+  "hartung_knapp_adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "covariates": "age",
+    "adjustAbundance": true,
+    "variance": "hartung_knapp"
+  },
+  "knn_adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "k": 10,
+    "adjustAbundance": true
+  },
+  "radii_adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": [10, 20, 40],
+    "covariates": ["age_na", "batch"],
+    "adjustAbundance": true
+  },
+  "radii_davies_adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": [5, 10, 15, 20, 25, 30, 35, 40],
+    "combine": "davies",
+    "effect": "count",
+    "adjustAbundance": true,
+    "from": ["tumour", "T"]
+  },
+  "radii_cauchy_covariates": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": [10, 20, 40],
+    "combine": "cauchy",
+    "covariates": "age"
+  }
+}
