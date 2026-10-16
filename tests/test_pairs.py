@@ -16,6 +16,16 @@ CELLS = pd.read_csv(HERE / "cells.csv")
 EXACT = json.loads((HERE / "exact_cases.json").read_text())
 R_TO_PY = {"from": "from_", "adjustAbundance": "adjust_abundance"}
 BASE = {"condition": "condition", "subject": "patient"}
+# The core sums the design's columns in long double, as R does. The references were written on x86-64 Linux
+# (80-bit long double); where long double is double (macOS on arm64, MSVC) the sums round differently.
+EXTENDED = np.finfo(np.longdouble).nmant > 52
+
+
+def equal(x, y, err_msg):
+    if EXTENDED:
+        np.testing.assert_array_equal(x, y, err_msg=err_msg)
+    else:
+        np.testing.assert_allclose(x, y, rtol=1e-7, atol=1e-10, equal_nan=True, err_msg=err_msg)  # test_shared_cases
 
 
 def each_pair(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine, n_threads=1):
@@ -66,7 +76,7 @@ def test_adjusted_exactly_as_r(name):
     assert list(got.columns) == list(exp.columns)
     for col in exp.columns:
         if exp[col].dtype.kind in "fi":
-            np.testing.assert_array_equal(got[col].to_numpy(float), exp[col].to_numpy(float), err_msg=f"{name}: {col}")
+            equal(got[col].to_numpy(float), exp[col].to_numpy(float), f"{name}: {col}")
         else:
             assert got[col].astype(str).tolist() == exp[col].astype(str).tolist(), f"{name}: {col}"
     radii = HERE / f"exact_{name}_radii.csv"
@@ -77,4 +87,4 @@ def test_adjusted_exactly_as_r(name):
         assert len(m) == len(er) == len(gr)
         for col in ("p_value", "excess_difference", "se", "unadjusted_p_value"):
             if f"{col}_r" in m:
-                np.testing.assert_array_equal(m[f"{col}_py"], m[f"{col}_r"], err_msg=f"{name}: radii {col}")
+                equal(m[f"{col}_py"].to_numpy(float), m[f"{col}_r"].to_numpy(float), f"{name}: radii {col}")
