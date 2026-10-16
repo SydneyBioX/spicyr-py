@@ -18,6 +18,16 @@ CELLS = pd.read_csv(HERE / "noinfo_cells.csv")
 CELLS3 = pd.read_csv(HERE / "noinfo_cells3.csv")
 EXPECTED = json.loads((HERE / "noinfo_expected.json").read_text())
 R_TO_PY = {"adjustAbundance": "adjust_abundance"}
+# spicyR's results were written on x86-64 Linux; where long double is double (macOS arm64, MSVC) sums in the core round
+# differently, so there they are compared as the shared cases are
+EXTENDED = np.finfo(np.longdouble).nmant > 52
+
+
+def same(got, exp, msg=""):
+    if EXTENDED:
+        np.testing.assert_array_equal(got, exp, err_msg=msg)
+    else:
+        np.testing.assert_allclose(got, exp, rtol=1e-7, atol=1e-10, equal_nan=True, err_msg=msg)
 
 
 def run(cells=CELLS, **kw):
@@ -54,7 +64,7 @@ def test_the_rows_of_condition_a_are_all_at_minus_one():
 
 
 @pytest.mark.parametrize("name", sorted(EXPECTED))
-def test_python_equals_r_exactly(name):
+def test_python_equals_r(name):
     exp = EXPECTED[name]
     res = run_case(name)
     cr = res.cell_results
@@ -62,13 +72,13 @@ def test_python_equals_r_exactly(name):
         if exp[col] is None:
             assert col not in cr.columns
             continue
-        np.testing.assert_array_equal(cr[col].to_numpy(float), num(exp[col]), err_msg=f"{name}: {col}")
+        same(cr[col].to_numpy(float), num(exp[col]), f"{name}: {col}")
     if exp["adjusted_for"] is not None:
         assert list(cr["adjusted_for"]) == as_list(exp["adjusted_for"])
     if exp["radius_p"] is not None:
         rr = res.radius_results
         np.testing.assert_array_equal(rr["r"].to_numpy(float), num(exp["radius_r"]))
-        np.testing.assert_array_equal(rr["p_value"].to_numpy(float), num(exp["radius_p"]), err_msg=f"{name}: radius p")
+        same(rr["p_value"].to_numpy(float), num(exp["radius_p"]), f"{name}: radius p")
         if exp["radius_adjusted_for"] is not None:
             assert list(rr["adjusted_for"]) == as_list(exp["radius_adjusted_for"])
 
