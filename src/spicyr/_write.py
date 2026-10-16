@@ -216,7 +216,8 @@ class _Writer:
             else:
                 self.column(op, c, obs[c], n)
         if instance:
-            t = _uint_type(max(n - 1, 0))
+            # instance IDs in 16 bits at least (spatialdata refuses an 8-bit instance key)
+            t = _uint_type(max(n - 1, 256))
             self.rows(op, "instance_id", n, t, lambda a, b: np.arange(a, b, dtype=t))
         vp = self.group(
             tab,
@@ -284,10 +285,10 @@ def write_cell_store(
     rows at a time and ``spatialdata.read_zarr()`` reads as a SpatialData object. The coordinates become the
     ``obsm`` array ``"spatial"`` and the other columns the table's ``obs`` (categorical columns stay categorical).
     The image column is the table's region key: a categorical column whose categories are the images in order of
-    first appearance, unless it is categorical already. A column ``"instance_id"`` numbers the cells from 0. A table
-    with one row per image can be added as a second table. Every array of the length of the table is written in
-    chunks of ``chunk_rows`` rows compressed with zstd, one chunk at a time, so writing needs little memory beyond
-    that of ``cells``, however many cells it has.
+    first appearance, unless it is categorical already. A column ``"instance_id"`` numbers the cells from 0
+    (unsigned integers of 16 bits at least). A table with one row per image can be added as a second table. Every
+    array of the length of the table is written in chunks of ``chunk_rows`` rows compressed with zstd, one chunk at
+    a time, so writing needs little memory beyond that of ``cells``, however many cells it has.
 
     Parameters
     ----------

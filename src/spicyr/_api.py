@@ -209,7 +209,6 @@ def spicy(
             effect,
         )
     else:
-        per_r = []
         # several radii: one neighbour search at the largest radius gives every radius's graph
         graphs = (
             _cell.cell_graphs_radii(ctx, radii, effect, n_threads=cores)
@@ -226,15 +225,11 @@ def spicy(
                 )
             ]
         )
-        for g in graphs:
-            g.image_heterogeneity = True
-            per_r.append(
-                [
-                    _cell.cell_pair_test(ctx, g, p[0], p[1], True, variance, adjust_abundance, Z_extra, extra_names)
-                    for p in pairs
-                ]
-            )
-        res = _combine(per_r, radii, ctx, adjust_abundance or covariates is not None, combine)
+        adjusted = adjust_abundance or covariates is not None
+        if len(ctx.levels) > 2 or adjusted:
+            res = _pair_by_pair(ctx, graphs, pairs, variance, adjust_abundance, Z_extra, extra_names, radii, combine)
+        else:
+            res = _pairs(ctx, graphs, pairs, variance, adjust_abundance, Z_extra, extra_names, radii, combine, cores)
     out = _results(res, ctx, pheno, condition, subject, is_surv, radii, k, effect)
     out.variance = None if is_surv else variance
     return out
@@ -259,6 +254,17 @@ def _model_matrix(pheno, covariates):
             cols.append(d)
             names += [f"{c}{l}" for l in lev[1:]]
     return np.column_stack(cols), names
+
+
+def _pair_by_pair(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine):
+    """More than two conditions, or a design to adjust for: each pair's test (and design) in turn, then the tables."""
+    per_r = []
+    for g in graphs:
+        g.image_heterogeneity = True
+        per_r.append(
+            [_cell.cell_pair_test(ctx, g, p[0], p[1], True, variance, adjust, Z_extra, extra_names) for p in pairs]
+        )
+    return _combine(per_r, radii, ctx, adjust or Z_extra is not None, combine)
 
 
 def _combine(per_r, radii, ctx, adjusted, combine):
@@ -315,6 +321,142 @@ def _combine(per_r, radii, ctx, adjusted, combine):
     tab.index = tab["from"] + "__" + tab["to"]
     mid = int(np.argmin(np.abs(np.array(radii) - np.median(radii))))
     return {"table": _cell.order_columns(tab), "fits": per_r[mid], "radius_table": long}
+
+
+def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine, n_threads=1):
+    """Two conditions: every pair at every radius in one call to the core, then the tables.
+
+    The core's pair_tests gives, per pair and radius, the image rows, the image random effect, the frailty test and
+    the adjusted design, as cell_pair_test() does for one, and with several radii their combination. Several radii:
+    per-radius tables, and one row per pair with the combined p-value (the main test and, when adjusted, the
+    unadjusted test); the other columns are those of the radius chosen by max-T. The image rows are those of the
+    radius nearest the median.
+    """
+    allocation = graphs[0].effect == "allocation"
+    K = len(graphs)
+    keep = int(np.argmin(np.abs(np.array(radii) - np.median(radii)))) if K > 1 else 0
+    from_ = [p[0] for p in pairs]
+    to = [p[1] for p in pairs]
+    x = _core.pair_tests(
+        [g.any if allocation else g.totals for g in graphs],
+        [g.self_expected if allocation else g.sq for g in graphs],
+        allocation,
+        graphs[0].knn,
+        ctx.counts,
+        len(ctx.type_labels),
+        graphs[0].psi,
+        np.array([ctx.type_labels.index(f) for f in from_], dtype=np.int32),
+        np.array([ctx.type_labels.index(t) for t in to], dtype=np.int32),
+        ctx.image_unit.astype(np.int32),
+        ctx.image_group.astype(np.int32),
+        len(ctx.unit_labels),
+        True,
+        True,
+        variance,
+        adjust,
+        np.zeros(0) if Z_extra is None else Z_extra,
+        0 if Z_extra is None else Z_extra.shape[1],
+        keep,
+        combine if K > 1 else "none",
+        int(n_threads),
+    )
+    adjusted = adjust or Z_extra is not None
+    names = None if Z_extra is None else list(extra_names)
+    tabs = [_pairs_table(x, k, from_, to, allocation, adjusted, names) for k in range(K)]
+    fits = [
+        {"from": from_[i], "to": to[i], "rows": x["rows"][i], "unadjusted": {"image_weight": x["image_weight"][i]}}
+        for i in range(len(pairs))
+    ]
+    if K == 1:
+        return {"table": tabs[0], "fits": fits}
+    long = pd.concat([t.assign(r=rr) for t, rr in zip(tabs, radii, strict=True) if t is not None])
+    long = long[["r"] + [c for c in long.columns if c != "r"]]
+    # the rows of `long`: radius by radius, the pairs tested there; one row per pair (in order of first appearance),
+    # that of its chosen radius
+    pk = [np.flatnonzero(x["ok"][:, k] == 1) for k in range(K)]
+    at = np.full((K, len(pairs)), -1)
+    pos = 0
+    for k in range(K):
+        at[k, pk[k]] = np.arange(pos, pos + len(pk[k]))
+        pos += len(pk[k])
+    key = np.array(list(dict.fromkeys(np.concatenate(pk).tolist())), dtype=int)
+    tab = long.iloc[at[x["best"][key], key]].copy()
+    tab["p_value"] = x["comb_p"][key]
+    tab["p_value_best_radius"] = x["comb_p_best"][key]
+    if adjusted:
+        tab["unadjusted_p_value"] = x["comb_u_p"][key]
+    tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
+    if adjusted:
+        tab["unadjusted_p_adj"] = _cell.p_adjust_bh(tab["unadjusted_p_value"])
+    tab = tab.drop(columns=[c for c in ("unadjusted_difference", "unadjusted_se", "unadjusted_df") if c in tab.columns])
+    tab.index = tab["from"] + "__" + tab["to"]
+    return {"table": _cell.order_columns(tab), "fits": fits, "radius_table": long}
+
+
+def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names):
+    """The table of one radius from the core's pair_tests (the columns and rows cell_table() gives for the same fits).
+
+    extra_names: the covariates' columns, None without covariates.
+    """
+    s = np.flatnonzero(x["ok"][:, k] == 1)
+    if not len(s):
+        return None
+
+    def at(key):
+        return x[key][s, k]
+
+    tab = {
+        "from": [from_[i] for i in s],
+        "to": [to[i] for i in s],
+        "excess_ref": at("coef_ref"),
+        "excess_comp": at("coef_comp"),
+        "excess_difference": at("difference"),
+        "se": at("se"),
+        "df": at("df"),
+        "p_value": at("p"),
+        "tau2": at("tau2"),
+    }
+    if allocation:
+        tab["side"] = ["attract" if v > 0 else "avoid" for v in at("side")]
+    tab["tau2_image"] = at("tau2_image")
+    if adjusted:
+        K = x["ok"].shape[1]
+        design, ab = at("design"), at("abundance") == 1
+        extra = [] if extra_names is None else extra_names
+        # the added columns of each adjusted fit (the abundance first), named as cell_pair_test() names its effects
+        added = [(["abundance"] if a else []) + extra for a in ab]
+        label = [
+            "+".join(
+                (["abundance"] if "abundance" in nm[:1] else []) + (["covariates"] if extra_names is not None else [])
+            )
+            for nm in added
+        ]
+        tab["adjusted_for"] = [
+            label[j] if d == 1 else f"none ({x['design_reason'][i * K + k]})" if d == 2 else "none"
+            for j, (i, d) in enumerate(zip(s, design, strict=True))
+        ]
+        enames = list(dict.fromkeys(nm for j in np.flatnonzero(design == 1) for nm in added[j]))
+        for nm in enames:
+            e = np.full(len(s), np.nan)
+            ep = np.full(len(s), np.nan)
+            for j in np.flatnonzero(design == 1):
+                if nm in added[j]:
+                    q = len(added[j]) - 1 - added[j][::-1].index(nm)  # its last place (as a dict of the names)
+                    c = q if ab[j] else q + 1  # the core's index: 0 the abundance, 1 + c covariate c
+                    e[j] = x["effect"][s[j], k, c]
+                    ep[j] = x["effect_p"][s[j], k, c]
+            tab[f"{nm}_effect"] = e
+            tab[f"{nm}_p_value"] = ep
+        tab["unadjusted_difference"] = at("u_difference")
+        tab["unadjusted_se"] = at("u_se")
+        tab["unadjusted_df"] = at("u_df")
+        tab["unadjusted_p_value"] = at("u_p")
+    tab = pd.DataFrame(tab)
+    tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
+    if adjusted:
+        tab["unadjusted_p_adj"] = _cell.p_adjust_bh(tab["unadjusted_p_value"])
+    tab.index = tab["from"] + "__" + tab["to"]
+    return _cell.order_columns(tab)
 
 
 def _survival(

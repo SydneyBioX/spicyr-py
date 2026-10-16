@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "spicyglm/core.hpp"
@@ -174,6 +175,88 @@ void stream_batch(const py::array& x, const py::array& y, const py::array& image
   spicyglm::rows_totals(rows, maps, o, out, n_threads);
 }
 
+// spicy()'s two-condition test of every pair at every radius (or at the one k) in one call (core: pair_tests), as
+// spicyR's stats_pair_tests(). a, b: one array per radius (allocation: any totals and self_expected; count: totals
+// and sq); counts: images x types; psi: types x images, or empty for psi = 1; from / to: the pairs (0-based types);
+// image_group: 0 or 1, -1 when missing; z: images x n_z (centred, NaN where missing), or empty; keep_radius: 0-based.
+// Per pair and radius the results are (P, K) arrays (effects: (P, K, 1 + n_z), the abundance then the covariates);
+// best is 0-based, -1 for none.
+py::dict pair_tests_np(const py::list& a, const py::list& b, bool allocation, bool knn, const DoubleArray& counts,
+                       int n_types, const DoubleArray& psi, const IntArray& from, const IntArray& to,
+                       const IntArray& image_unit, const IntArray& image_group, int n_units, bool image_heterogeneity,
+                       bool frailty, const std::string& variance, bool adjust, const DoubleArray& z, int n_z,
+                       int keep_radius, const std::string& combine, int n_threads) {
+  const std::size_t K = a.size(), T = static_cast<std::size_t>(n_types);
+  if (K < 1 || b.size() != K) throw std::invalid_argument("pair_tests: one a and one b per radius");
+  if (n_types < 1 || counts.size() % n_types != 0) throw std::invalid_argument("pair_tests: counts must be images x types");
+  const std::size_t n_images = static_cast<std::size_t>(counts.size()) / T;
+  // the arrays (converted once, if they need it) live through the call
+  std::vector<DoubleArray> av, bv;
+  PairTestInput in;
+  for (std::size_t k = 0; k < K; ++k) {
+    av.push_back(a[k].cast<DoubleArray>()); bv.push_back(b[k].cast<DoubleArray>());
+    if (static_cast<std::size_t>(av.back().size()) != n_images * T * T ||
+        static_cast<std::size_t>(bv.back().size()) != n_images * T * (allocation ? 1 : T))
+      throw std::invalid_argument("pair_tests: neighbour totals of the wrong size");
+    in.a.push_back(av.back().data()); in.b.push_back(bv.back().data());
+  }
+  if (psi.size() > 0) {
+    if (static_cast<std::size_t>(psi.size()) != T * n_images) throw std::invalid_argument("pair_tests: psi must be types x images");
+    in.psi = psi.data();
+  }
+  if (n_z > 0) {
+    if (static_cast<std::size_t>(z.size()) != n_images * n_z) throw std::invalid_argument("pair_tests: z must be images x n_z");
+    in.z = z.data(); in.n_z = n_z;
+  }
+  if (from.size() != to.size()) throw std::invalid_argument("pair_tests: from and to differ in length");
+  for (py::ssize_t i = 0; i < from.size(); ++i)
+    if (from.data()[i] < 0 || from.data()[i] >= n_types || to.data()[i] < 0 || to.data()[i] >= n_types)
+      throw std::invalid_argument("pair_tests: cell type out of range");
+  if (static_cast<std::size_t>(image_unit.size()) != n_images || static_cast<std::size_t>(image_group.size()) != n_images)
+    throw std::invalid_argument("pair_tests: one unit and one group per image");
+  if (keep_radius < 0 || static_cast<std::size_t>(keep_radius) >= K) throw std::invalid_argument("pair_tests: keep_radius out of range");
+  in.allocation = allocation; in.knn = knn; in.counts = counts.data(); in.n_types = n_types;
+  in.n_images = static_cast<int>(n_images);
+  in.from = vec<int>(from); in.to = vec<int>(to);
+  in.image_unit = image_unit.data(); in.image_group = image_group.data(); in.n_units = n_units;
+  in.image_heterogeneity = image_heterogeneity; in.frailty = frailty;
+  in.variance = variance == "hartung_knapp" ? Variance::HartungKnapp : Variance::CR2;
+  in.adjust = adjust; in.keep_radius = keep_radius; in.n_threads = n_threads;
+  in.combine = combine == "maxT" ? Combine::MaxT : combine == "davies" ? Combine::Davies
+             : combine == "cauchy" ? Combine::Cauchy : Combine::None;
+  PairTests r;
+  {
+    py::gil_scoped_release release;
+    r = pair_tests(in);
+  }
+  const std::size_t P = static_cast<std::size_t>(r.n_pairs), ne = 1 + static_cast<std::size_t>(r.n_z);
+  auto pk = [&](const auto& v) {
+    using V = typename std::decay_t<decltype(v)>::value_type;
+    py::array_t<V> x({P, K});
+    std::copy(v.begin(), v.end(), x.mutable_data());
+    return x;
+  };
+  auto pke = [&](const std::vector<double>& v) {
+    py::array_t<double> x({P, K, ne});
+    std::copy(v.begin(), v.end(), x.mutable_data());
+    return x;
+  };
+  py::dict out;
+  out["ok"] = pk(r.ok); out["side"] = pk(r.side); out["n_rows"] = pk(r.n_rows); out["tau2_image"] = pk(r.tau2_image);
+  out["coef_ref"] = pk(r.coef_ref); out["coef_comp"] = pk(r.coef_comp); out["difference"] = pk(r.difference);
+  out["se"] = pk(r.se); out["df"] = pk(r.df); out["p"] = pk(r.p); out["tau2"] = pk(r.tau2);
+  out["u_difference"] = pk(r.u_difference); out["u_se"] = pk(r.u_se); out["u_df"] = pk(r.u_df); out["u_p"] = pk(r.u_p);
+  out["design"] = pk(r.design); out["abundance"] = pk(r.abundance);
+  out["design_reason"] = py::cast(r.design_reason);   // a list, pair-major (p * K + k)
+  out["effect"] = pke(r.effect); out["effect_p"] = pke(r.effect_p);
+  py::list rows, weight;
+  for (std::size_t p = 0; p < P; ++p) { rows.append(rows_to(r.rows[p])); weight.append(arr(r.image_weight[p])); }
+  out["rows"] = rows; out["image_weight"] = weight;
+  out["best"] = arr(r.best); out["comb_p"] = arr(r.comb_p); out["comb_p_best"] = arr(r.comb_p_best);
+  out["comb_u_p"] = arr(r.comb_u_p);
+  return out;
+}
+
 }  // namespace
 
 PYBIND11_MODULE(_core, m) {
@@ -289,6 +372,12 @@ PYBIND11_MODULE(_core, m) {
     o["hr_se"] = r.hr_se; o["hr_p"] = r.hr_p; o["log_hr_unit"] = r.log_hr_unit; o["tau2"] = r.tau2;
     return o;
   });
+
+  m.def("pair_tests", &pair_tests_np, py::arg("a"), py::arg("b"), py::arg("allocation"), py::arg("knn"),
+        py::arg("counts"), py::arg("n_types"), py::arg("psi"), py::arg("from_"), py::arg("to"), py::arg("image_unit"),
+        py::arg("image_group"), py::arg("n_units"), py::arg("image_heterogeneity"), py::arg("frailty"),
+        py::arg("variance"), py::arg("adjust"), py::arg("z"), py::arg("n_z"), py::arg("keep_radius"),
+        py::arg("combine"), py::arg("n_threads") = 1);
 
   m.def("cauchy_combine", [](const DoubleArray& p) { return cauchy_combine(vec<double>(p)); });
 

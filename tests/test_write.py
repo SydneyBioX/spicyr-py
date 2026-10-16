@@ -112,6 +112,18 @@ def test_spatialdata_reads_the_store(tmp_path):
     same(spicyr.spicy(sdata, **ARGS), spicyr.spicy(cells, **ARGS))
 
 
+def test_spatialdata_reads_a_small_store(tmp_path):
+    # fewer than 256 cells: instance IDs in 16 bits, as spatialdata requires
+    sd = pytest.importorskip("spatialdata")
+    cells = CELLS.iloc[:200]
+    path = spicyr.write_cell_store(cells, tmp_path / "small.zarr")
+    assert read_table(path).obs["instance_id"].dtype == np.uint16
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")  # the regions are not elements of the store
+        sdata = sd.read_zarr(path)
+    np.testing.assert_array_equal(sdata.tables["table"].obs["instance_id"], np.arange(200))
+
+
 def test_errors(tmp_path):
     with pytest.raises(ValueError, match="columns not found"):
         spicyr.write_cell_store(CELLS.drop(columns="y"), tmp_path / "a.zarr")
