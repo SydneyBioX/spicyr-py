@@ -313,6 +313,9 @@ PYBIND11_MODULE(_core, m) {
     d["tau2_image"] = tau2;
     return d;
   });
+  m.def("informative_units", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_groups) {
+    return arr(informative_units(rows_from(rows), vec<int>(unit), vec<int>(group), n_groups));
+  });
   m.def("label_clustering_factor", [](const Dataset& d, const IntArray& from, const IntArray& to, const DoubleArray& counts,
                                       int n_types, bool knn, double h, bool allocation) {
     int n_images = static_cast<int>(counts.size() / n_types);

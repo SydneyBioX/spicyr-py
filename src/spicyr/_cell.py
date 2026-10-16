@@ -506,6 +506,17 @@ def _design_tests(rows, m, Z, C, tau2, hk):
     return _core.design_tests(rows, rows["unit"], m, Z, C, C.shape[0], tau2, hk)
 
 
+def _no_information(rows, G) -> bool:
+    """Allocation (rows with a side): whether a condition (of G) has no informative patient.
+
+    An informative patient has at least one image whose effect (O - E) / n is not exactly -1 or +1, the bounds of the
+    fraction.
+    """
+    if "side" not in rows or "group" not in rows:
+        return False
+    return bool((np.asarray(_core.informative_units(rows, rows["unit"], rows["group"], G)) == 0).any())
+
+
 def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_names=()) -> dict:
     rows = cell_rows(ctx, g, f, t)
     if len(ctx.levels) > 2:
@@ -524,8 +535,17 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_
     }
     if not r["ok"]:
         return out
+    # allocation: a condition with no informative patient (every image at -1 or +1, the bounds of the fraction) has a
+    # CR2 variance of exactly 0; the radius is not tested (as the core's pair_tests)
+    noinfo = r["se"] > 0 and _no_information(rows, 2)
+    if noinfo:
+        out["test"] = dict(r, p=np.nan)
+        out["unadjusted"] = out["test"]
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
+        return out
+    if noinfo:
+        out["adjusted_for"] = "none (no_information)"
         return out
     # no variation (the unadjusted test is 0 / 0): an adjusted design would only fit rounding noise; not tested
     if not r["se"] > 0:
@@ -579,6 +599,9 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
     # adjusted design is fitted then either)
     if not u[0]["ok"]:
         out["reason"] = "no_variation" if u[0]["reason"] == "no_variation" else "design_not_full_rank"
+        return out
+    if _no_information(rows, G):
+        out["reason"] = "no_information"
         return out
     un = dict(zip(ctx.levels[1:], u, strict=True))
     out.update(ok=True, levels_test=un, unadjusted_levels=un, test={"coef_ref": u[0]["theta"][0], "tau2": u[0]["tau2"]})

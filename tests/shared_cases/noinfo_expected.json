@@ -1,0 +1,347 @@
+{
+  "single": {
+    "args": {
+      "r": 4
+    },
+    "p_value": [
+      null
+    ],
+    "unadjusted_p_value": null,
+    "r": null,
+    "excess_difference": [
+      "0.43001364917364548"
+    ],
+    "se": [
+      "0.063322900670965271"
+    ],
+    "df": [
+      "13.247698814513607"
+    ],
+    "adjusted_for": null,
+    "radius_p": null,
+    "radius_r": null,
+    "radius_adjusted_for": null
+  },
+  "single_adj": {
+    "args": {
+      "r": 4,
+      "covariates": "age",
+      "adjustAbundance": true
+    },
+    "p_value": [
+      null
+    ],
+    "unadjusted_p_value": [
+      null
+    ],
+    "r": null,
+    "excess_difference": [
+      "0.43001364917364548"
+    ],
+    "se": [
+      "0.063322900670965271"
+    ],
+    "df": [
+      "13.247698814513607"
+    ],
+    "adjusted_for": "none (no_information)",
+    "radius_p": null,
+    "radius_r": null,
+    "radius_adjusted_for": null
+  },
+  "single_ok": {
+    "args": {
+      "r": 4.8
+    },
+    "p_value": [
+      "0.00021494688418466853"
+    ],
+    "unadjusted_p_value": null,
+    "r": null,
+    "excess_difference": [
+      "0.2917969992397651"
+    ],
+    "se": [
+      "0.057176746056512025"
+    ],
+    "df": [
+      "12.755264656333093"
+    ],
+    "adjusted_for": null,
+    "radius_p": null,
+    "radius_r": null,
+    "radius_adjusted_for": null
+  },
+  "count_single": {
+    "args": {
+      "r": 4,
+      "effect": "count"
+    },
+    "p_value": [
+      "0.0002446839250134881"
+    ],
+    "unadjusted_p_value": null,
+    "r": null,
+    "excess_difference": [
+      "0.13723707984593586"
+    ],
+    "se": [
+      "0.027792992773383551"
+    ],
+    "df": [
+      "13.464738605579655"
+    ],
+    "adjusted_for": null,
+    "radius_p": null,
+    "radius_r": null,
+    "radius_adjusted_for": null
+  },
+  "count_davies": {
+    "args": {
+      "r": [4, 4.8, 5.2],
+      "combine": "davies",
+      "effect": "count"
+    },
+    "p_value": [
+      "0.0010180753442551576"
+    ],
+    "unadjusted_p_value": null,
+    "r": [
+      "4"
+    ],
+    "excess_difference": [
+      "0.13723707984593586"
+    ],
+    "se": [
+      "0.027792992773383551"
+    ],
+    "df": [
+      "13.464738605579655"
+    ],
+    "adjusted_for": null,
+    "radius_p": [
+      "0.0002446839250134881",
+      "0.00029003099002623974",
+      "0.16786134829162214"
+    ],
+    "radius_r": [
+      "4",
+      "4.7999999999999998",
+      "5.2000000000000002"
+    ],
+    "radius_adjusted_for": null
+  },
+  "davies": {
+    "args": {
+      "r": [4, 4.8, 5.2],
+      "combine": "davies"
+    },
+    "p_value": [
+      "0.00068955569810541409"
+    ],
+    "unadjusted_p_value": null,
+    "r": [
+      "4.7999999999999998"
+    ],
+    "excess_difference": [
+      "0.2917969992397651"
+    ],
+    "se": [
+      "0.057176746056512025"
+    ],
+    "df": [
+      "12.755264656333093"
+    ],
+    "adjusted_for": null,
+    "radius_p": [
+      null,
+      "0.00021494688418466853",
+      "0.11394846790091442"
+    ],
+    "radius_r": [
+      "4",
+      "4.7999999999999998",
+      "5.2000000000000002"
+    ],
+    "radius_adjusted_for": null
+  },
+  "davies_adj": {
+    "args": {
+      "r": [4, 4.8, 5.2],
+      "combine": "davies",
+      "adjustAbundance": true
+    },
+    "p_value": [
+      "0.0021167423904074867"
+    ],
+    "unadjusted_p_value": [
+      "0.00068955569810541409"
+    ],
+    "r": [
+      "4.7999999999999998"
+    ],
+    "excess_difference": [
+      "0.26214099142103592"
+    ],
+    "se": [
+      "0.05054789711518045"
+    ],
+    "df": [
+      "8.6230420237756125"
+    ],
+    "adjusted_for": "abundance",
+    "radius_p": [
+      null,
+      "0.00065903382699111031",
+      "0.23063032310326514"
+    ],
+    "radius_r": [
+      "4",
+      "4.7999999999999998",
+      "5.2000000000000002"
+    ],
+    "radius_adjusted_for": ["none (no_information)", "abundance", "abundance"]
+  },
+  "maxT": {
+    "args": {
+      "r": [4, 4.8, 5.2],
+      "combine": "maxT"
+    },
+    "p_value": [
+      "0.00042967609003370503"
+    ],
+    "unadjusted_p_value": null,
+    "r": [
+      "4.7999999999999998"
+    ],
+    "excess_difference": [
+      "0.2917969992397651"
+    ],
+    "se": [
+      "0.057176746056512025"
+    ],
+    "df": [
+      "12.755264656333093"
+    ],
+    "adjusted_for": null,
+    "radius_p": [
+      null,
+      "0.00021494688418466853",
+      "0.11394846790091442"
+    ],
+    "radius_r": [
+      "4",
+      "4.7999999999999998",
+      "5.2000000000000002"
+    ],
+    "radius_adjusted_for": null
+  },
+  "maxT_adj": {
+    "args": {
+      "r": [4, 4.8, 5.2],
+      "combine": "maxT",
+      "adjustAbundance": true
+    },
+    "p_value": [
+      "0.0013175208352071148"
+    ],
+    "unadjusted_p_value": [
+      "0.00042967609003370503"
+    ],
+    "r": [
+      "4.7999999999999998"
+    ],
+    "excess_difference": [
+      "0.26214099142103592"
+    ],
+    "se": [
+      "0.05054789711518045"
+    ],
+    "df": [
+      "8.6230420237756125"
+    ],
+    "adjusted_for": "abundance",
+    "radius_p": [
+      null,
+      "0.00065903382699111031",
+      "0.23063032310326514"
+    ],
+    "radius_r": [
+      "4",
+      "4.7999999999999998",
+      "5.2000000000000002"
+    ],
+    "radius_adjusted_for": ["none (no_information)", "abundance", "abundance"]
+  },
+  "cauchy": {
+    "args": {
+      "r": [4, 4.8, 5.2],
+      "combine": "cauchy"
+    },
+    "p_value": [
+      "0.00042911898059161402"
+    ],
+    "unadjusted_p_value": null,
+    "r": [
+      "4.7999999999999998"
+    ],
+    "excess_difference": [
+      "0.2917969992397651"
+    ],
+    "se": [
+      "0.057176746056512025"
+    ],
+    "df": [
+      "12.755264656333093"
+    ],
+    "adjusted_for": null,
+    "radius_p": [
+      null,
+      "0.00021494688418466853",
+      "0.11394846790091442"
+    ],
+    "radius_r": [
+      "4",
+      "4.7999999999999998",
+      "5.2000000000000002"
+    ],
+    "radius_adjusted_for": null
+  },
+  "cauchy_adj": {
+    "args": {
+      "r": [4, 4.8, 5.2],
+      "combine": "cauchy",
+      "adjustAbundance": true
+    },
+    "p_value": [
+      "0.0013149861872448487"
+    ],
+    "unadjusted_p_value": [
+      "0.00042911898059161402"
+    ],
+    "r": [
+      "4.7999999999999998"
+    ],
+    "excess_difference": [
+      "0.26214099142103592"
+    ],
+    "se": [
+      "0.05054789711518045"
+    ],
+    "df": [
+      "8.6230420237756125"
+    ],
+    "adjusted_for": "abundance",
+    "radius_p": [
+      null,
+      "0.00065903382699111031",
+      "0.23063032310326514"
+    ],
+    "radius_r": [
+      "4",
+      "4.7999999999999998",
+      "5.2000000000000002"
+    ],
+    "radius_adjusted_for": ["none (no_information)", "abundance", "abundance"]
+  }
+}

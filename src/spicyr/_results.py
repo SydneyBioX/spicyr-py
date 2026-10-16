@@ -432,11 +432,23 @@ class SpicyResults:
                 note = " (unadjusted test in the unadjusted_* columns)" if "unadjusted_p_adj" in t.columns else ""
                 lines.append(f"Adjusted for: {', '.join(parts)}{note}")
             novar = int((t["adjusted_for"] == "none (no_variation)").sum())
-            fallback = int(t["adjusted_for"].str.startswith("none (").sum()) - novar
+            noinfo = int((t["adjusted_for"] == "none (no_information)").sum())
+            fallback = int(t["adjusted_for"].str.startswith("none (").sum()) - novar - noinfo
             if fallback:
                 lines.append(f"{fallback} pairs could not be adjusted and are reported unadjusted (see adjusted_for)")
             if novar:
                 lines.append(f'{novar} pairs have no variation (adjusted_for "none (no_variation)") and are not tested')
+            if noinfo:
+                lines.append(
+                    f"{noinfo} pairs have a condition with no informative patient "
+                    '(adjusted_for "none (no_information)") and are not tested'
+                )
+        elif not self.survival:
+            untested = int(t["p_value"].isna().sum())
+            if untested:
+                lines.append(
+                    f"{untested} pairs are not tested (p_value NaN: no variation, or a condition with no informative patient)"
+                )
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
         if "unadjusted_p_adj" in t.columns:
             sig += f" ({int((t['unadjusted_p_adj'] < 0.05).sum())} without adjustment)"
