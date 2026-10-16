@@ -593,8 +593,9 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
     if per_level.isna().any() or (per_level < 2).any():
         out["reason"] = "one_patient_per_group"
         return out
-    Zg = (rows["group"][:, None] == np.arange(G)[None, :]).astype(float)
-    u = _design_tests(rows, m, Zg, _contrasts(G, G), -1.0 if frailty else 0.0, hk)
+    rg = _subset_rows(rows, rows["group"] >= 0)  # images with a missing condition are left out
+    Zg = (rg["group"][:, None] == np.arange(G)[None, :]).astype(float)
+    u = _design_tests(rg, m, Zg, _contrasts(G, G), -1.0 if frailty else 0.0, hk)
     # not of full rank, or no variation (the condition means fit the response exactly; the design test checks it, so no
     # adjusted design is fitted then either)
     if not u[0]["ok"]:
