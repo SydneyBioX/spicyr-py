@@ -517,6 +517,12 @@ def _rules(rows) -> dict:
     return _core.test_rules("side" in rows)
 
 
+def _few_effective(n_eff, m, rules) -> bool:
+    """True when a condition's effective patients n_eff fall below min(3, m_g / 2), m_g its patients with rows."""
+    m = np.asarray(m, dtype=float)
+    return bool((np.asarray(n_eff, dtype=float) < np.minimum(rules["min_n_eff"], m / 2)).any())
+
+
 def _no_information(rows, G) -> bool:
     """Allocation (rows with a side): whether a condition (of G) has no informative patient.
 
@@ -548,12 +554,12 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_
     if not r["ok"]:
         return out
     # not tested (as the core's pair_tests): allocation, a condition with no informative patient (every image at -1 or
-    # +1, the bounds of the fraction; its CR2 variance is exactly 0); then a condition with fewer than 3 effective
-    # patients (its mean rests on one or two of them)
+    # +1, the bounds of the fraction; its CR2 variance is exactly 0); then a condition whose effective patients fall
+    # below min(3, m_g / 2), m_g its patients with rows (its mean rests on a few of them)
     skip = None
     if r["se"] > 0 and _no_information(rows, 2):
         skip = "no_information"
-    elif rules["min_effective_units"] and r["se"] > 0 and min(r["n_eff"]) < rules["min_n_eff"]:
+    elif rules["min_effective_units"] and r["se"] > 0 and _few_effective(r["n_eff"], r["n_units"], rules):
         skip = "few_effective_units"
     if skip is not None:
         out["test"] = dict(r, p=np.nan)
@@ -626,7 +632,7 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
         return out
     if rules["min_effective_units"]:
         n_eff = np.asarray(_core.effective_units(rg, rg["unit"], rg["group"], G, u[0]["tau2"]))
-        if (n_eff < rules["min_n_eff"]).any():
+        if _few_effective(n_eff, per_level.to_numpy(), rules):
             out["reason"] = "few_effective_units"
             return out
     un = dict(zip(ctx.levels[1:], u, strict=True))

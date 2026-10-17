@@ -1,5 +1,5 @@
-"""The condition test's two rules: at least 3 effective patients per condition, and one dispersion shared by the
-conditions.
+"""The condition test's two rules: at least min(3, m_g / 2) effective patients per condition (m_g its patients with
+rows at the radius), and one dispersion shared by the conditions.
 
 One patient per image; image 1 (condition A) has 30 times the cells of the others at the same density, so at r = 5,
 where the patients do not differ (tau2 = 0), it carries nearly all of A's weight and A has under 2 effective patients.
@@ -105,6 +105,7 @@ def test_effective_patients_by_hand(r):
     kish = [w[g == k].sum() ** 2 / (w[g == k] ** 2).sum() for k in (0, 1)]
     np.testing.assert_allclose(u["n_eff"], kish, rtol=1e-12)
     np.testing.assert_allclose(_core.effective_units(rows, rows["unit"], rows["group"], 2, u["tau2"]), kish, rtol=1e-12)
+    np.testing.assert_array_equal(u["n_units"], [8, 8])
     few = min(kish) < 3
     assert few == (r == 5.0)
     x = run(r=r).cell_results
@@ -136,7 +137,9 @@ def test_count_has_the_same_rules():
         rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", rules["pooled_dispersion"]
     )
     x = run(r=5.0, effect="count").cell_results
-    assert x["p_value"].isna().iloc[0] == (rules["min_effective_units"] and min(u["n_eff"]) < 3)
+    assert x["p_value"].isna().iloc[0] == (
+        rules["min_effective_units"] and (u["n_eff"] < np.minimum(3, u["n_units"] / 2)).any()
+    )
     assert x["se"].iloc[0] == u["se"]
 
 
@@ -212,3 +215,21 @@ def test_pooled_dispersion_adjusted_by_hand():
     np.testing.assert_allclose([xa["excess_difference"], xa["se"]], [est, se], rtol=1e-8)
     np.testing.assert_allclose(xa["age_effect"], theta[2], rtol=1e-8)
     assert xa["unadjusted_p_value"] == pytest.approx(x["p_value"], rel=1e-12)
+
+
+def test_the_bound_is_min_3_half_the_patients():
+    rules = _core.test_rules(True)
+    assert not _cell._few_effective([1.5, 3], [3, 8], rules) and _cell._few_effective([1.49, 3], [3, 8], rules)
+    assert not _cell._few_effective([2.5, 3], [5, 6], rules) and _cell._few_effective([2.9, 3], [6, 6], rules)
+    assert _cell._few_effective([3, 2.9], [8, 9], rules)
+
+
+def test_a_condition_of_3_patients_is_tested():
+    cells = CELLS[CELLS["imageID"].isin([f"img{i:02d}" for i in range(2, 8)])]
+    ctx, rows = rows_at(12.0, cells=cells)
+    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", True)
+    np.testing.assert_array_equal(u["n_units"], [3, 3])
+    assert ((u["n_eff"] >= 1.5) & (u["n_eff"] < 3)).all()
+    x = run(cells, r=12.0).cell_results
+    assert x["p_value"].notna().all()
+    np.testing.assert_allclose(x["se"].iloc[0], u["se"], rtol=1e-12)

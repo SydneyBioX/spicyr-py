@@ -446,7 +446,7 @@ class SpicyResults:
                 )
             if few:
                 lines.append(
-                    f"{few} pairs have a condition with fewer than 3 effective patients "
+                    f"{few} pairs have a condition with too few effective patients "
                     '(adjusted_for "none (few_effective_units)") and are not tested'
                 )
         elif not self.survival:
@@ -454,7 +454,7 @@ class SpicyResults:
             if untested:
                 lines.append(
                     f"{untested} pairs are not tested (p_value NaN: no variation, a condition with no informative "
-                    "patient, or one with fewer than 3 effective patients)"
+                    "patient, or one with too few effective patients)"
                 )
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
         if "unadjusted_p_adj" in t.columns:

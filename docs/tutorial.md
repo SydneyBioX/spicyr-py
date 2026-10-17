@@ -486,8 +486,8 @@ from the data (a frailty, or random-effects, model). The difference between grou
 tested on Satterthwaite degrees of freedom with patients as the clusters, using the small-sample cluster-robust (CR2)
 variance. The groups share one dispersion: the model-based variance is scaled by the ratio
 of each group's CR2 variance to its model-based variance, averaged over the groups, so a small group's own spread does
-not set the standard error alone. A radius where a group has fewer than three effective patients, because one or two
-patients carry nearly all of its weight, is not tested. This is designed to keep false positives near the nominal
+not set the standard error alone. A radius where a group's effective patients fall below the smaller of three and
+half its patients at that radius, because a few patients carry nearly all of its weight, is not tested. This is designed to keep false positives near the nominal
 rate even with modest numbers of patients. A paper describing the method is in preparation.
 
 ## Small studies

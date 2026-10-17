@@ -1,5 +1,16 @@
 # spicyr news
 
+## 1.99.25
+
+- A radius is now not tested when a condition's effective patients fall below min(3, m_g / 2), where m_g is the number
+  of that condition's patients that contribute at that radius; before, the bound was 3. For conditions of 6 or more
+  patients nothing changes. The rule applies wherever the old one did: `spicy()` (both effects, with or without
+  adjustment, Hartung-Knapp, and each level with more than two conditions). The label stays
+  `"few_effective_units"`.
+- Small studies get most of their tests back. Over the small real-data analyses, the radii of the grid that are tested
+  rise from 78% to 95%, and a condition of 3 patients can now be tested (none could before).
+- Core synced from spicyR 1.99.30.
+
 ## 1.99.24
 
 - `spicy()` (both effects) no longer tests a radius where a condition has fewer than 3 effective patients: Kish's

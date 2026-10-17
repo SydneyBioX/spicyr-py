@@ -349,6 +349,7 @@ PYBIND11_MODULE(_core, m) {
     o["difference"] = r.difference; o["se"] = r.se; o["df"] = r.df; o["p"] = r.p; o["tau2"] = r.tau2;
     o["influence"] = arr(r.influence); o["unit_summary"] = arr(r.unit_summary); o["unit_info"] = arr(r.unit_info);
     o["image_weight"] = arr(r.image_weight); o["n_eff"] = arr(r.n_eff);
+    o["n_units"] = arr(r.n_units);
     return o;
   }, py::arg("rows"), py::arg("unit"), py::arg("group"), py::arg("n_units"), py::arg("frailty"), py::arg("variance"),
      py::arg("pooled_dispersion") = false);
