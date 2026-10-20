@@ -1,0 +1,41 @@
+{
+  "soft_allocation": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30
+  },
+  "soft_count_adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "effect": "count",
+    "adjustAbundance": true,
+    "from": ["tumour", "macro"],
+    "to": ["T", "lymphocyte"]
+  },
+  "soft_covariates": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "covariates": ["age", "batch"],
+    "adjustAbundance": true,
+    "from": "tumour",
+    "to": ["T", "B", "lymphocyte"]
+  },
+  "soft_three_levels": {
+    "condition": "stage",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "lymphocyte"],
+    "to": ["T", "macro"]
+  },
+  "soft_survival": {
+    "condition": "os",
+    "subject": "patient",
+    "r": 30,
+    "from": "tumour",
+    "to": ["T", "lymphocyte"],
+    "covariates": "age",
+    "adjustAbundance": true
+  }
+}

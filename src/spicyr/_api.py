@@ -5,6 +5,8 @@ The mirror of spicyR's ``R/spicy_main.R``.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 
@@ -35,6 +37,8 @@ def spicy(
     survival=None,
     table_key="table",
     image_info=None,
+    cell_weights=None,
+    weight_labels=None,
     **kwargs,
 ) -> SpicyResults:
     """Test whether the co-localisation of cell types differs between conditions, or is associated with survival.
@@ -149,6 +153,21 @@ def spicy(
         not columns of the cell table: a DataFrame, an AnnData object (its obs), or the key of a table of the
         SpatialData object or store. Its ``image_id`` column, or else its index, gives the image IDs. Every image of
         the cells needs a row, and every row an image.
+    cell_weights
+        Optional cell weights in [0, 1], in the order of the cells: a 1-D array with one weight per cell for its own
+        cell type (for example a quality score), or a cells x labels matrix of soft cell type membership (for example
+        a classifier's confidence; a DataFrame, whose columns are the labels, or a numpy array or scipy sparse matrix
+        with ``weight_labels``). A 1-D array (numpy array, list or pandas Series, taken by position) is the same as
+        the cells x cell types matrix with each cell's weight in its own type's column. With a matrix, ``from_`` and
+        ``to`` name labels, and labels may overlap (a group and its subtypes). A ``to`` cell counts with its weight,
+        and its score is the chance that it has a ``from`` neighbour within ``r`` if labels were drawn from the
+        weights (allocation), or the summed ``from`` weight of its neighbours (count). The null shuffles the ``to``
+        weights over the cells whose ``from`` weight is below 1, whose exact mean and variance replace those of
+        random labelling; 0/1 weights give the results of the cell types. The abundance share is the ``from``
+        label's summed weight over the image's cells. One radius, cells in memory; pairs of a label with itself are
+        not tested.
+    weight_labels
+        The labels of the columns of ``cell_weights`` when it is a 2-D numpy array or sparse matrix.
     """
     if "from" in kwargs:
         from_ = kwargs.pop("from")
@@ -172,6 +191,9 @@ def spicy(
         raise ValueError("effect must be 'allocation' or 'count'.")
     if r is None and k is None:
         r = 50
+    weighted = cell_weights is not None
+    if weighted and (k is not None or len(np.atleast_1d(r)) != 1 or isinstance(cells, str | os.PathLike)):
+        raise ValueError("`cell_weights` needs the cells in memory and one radius `r` (no `k`).")
     if k is not None:
         r = None
     src = cell_source(cells, image_id, cell_type, spatial_coords, table_key)
@@ -192,15 +214,21 @@ def spicy(
         survival=is_surv,
         ref=ref,
         image_id=image_id,
+        dataset=weighted,
     )
     types = ctx.type_labels
+    if weighted:
+        memb, types = _cell.membership(
+            cell_weights, src.n, weight_labels, src.type_codes, ctx.type_labels, src.type_labels
+        )
     bad = [
         t
         for t in ([from_] if isinstance(from_, str) else (from_ or [])) + ([to] if isinstance(to, str) else (to or []))
         if t not in types
     ]
     if bad:
-        raise ValueError(f"cell type not found: {bad}")
+        matrix = weighted and not _cell.is_weight_vector(cell_weights)
+        raise ValueError(f"not a column of `cell_weights`: {bad}" if matrix else f"cell type not found: {bad}")
     # from -> to: are `to` cells placed next to `from` cells (allocation: the extra fraction of `to` cells with a `from`
     # cell within r; count: extra `from` cells within r of each `to` cell), beyond the `to` cells being a random subset
     # of the cells that are not `from` cells. This is the core's own (counted, centre) order, so pairs pass through.
@@ -225,7 +253,29 @@ def spicy(
         raise ValueError("several radii are supported for two conditions; give one `r`.")
     if combine == "maxT" and len(radii) > 6 and not is_surv:
         raise ValueError('combine="maxT" supports up to 6 radii; use combine="davies" for more.')
-    if is_surv:
+    if weighted:
+        sv = _survival_setup(ctx, pheno, covariates) if is_surv else None
+        res = _cell.cell_weighted(
+            ctx,
+            memb,
+            types,
+            pairs,
+            radii[0],
+            effect,
+            variance,
+            adjust_abundance,
+            Z_extra,
+            extra_names,
+            (lambda c, rows, f, t: _survival_test(c, rows, f, t, sv, adjust_abundance, covariates))
+            if is_surv
+            else None,
+        )
+        res["table"] = (
+            _survival_table(res["fits"], adjust_abundance, covariates)
+            if is_surv
+            else _cell.cell_table(res["fits"], ctx, adjust_abundance or Z_extra is not None)
+        )
+    elif is_surv:
         res = _survival(
             ctx,
             pairs,
@@ -460,6 +510,25 @@ def _survival(
     adjust,
     effect="allocation",
 ):
+    """Survival: score test and the hazard ratio of the shrunken excess, per pair."""
+    sv = _survival_setup(ctx, pheno, covariates)
+    rr = radii[0]
+    g = _cell.cell_graph(
+        ctx,
+        pairs,
+        r=None if np.isnan(rr) else rr,
+        k=k,
+        label_clustering=False,
+        n_threads=cores,
+        effect=effect,
+    )
+    g.image_heterogeneity = True
+    fits = [_survival_test(ctx, _cell.cell_rows(ctx, g, f, t), f, t, sv, adjust, covariates) for f, t in pairs]
+    return {"table": _survival_table(fits, adjust, covariates), "fits": fits}
+
+
+def _survival_setup(ctx, pheno, covariates):
+    """The null Cox model (covariates only) and its martingale residuals, one per patient."""
     unit_first = np.array([int(np.argmax(ctx.image_unit == u)) for u in range(len(ctx.unit_labels))])
     time = pheno[".time"].to_numpy(float)[unit_first]
     event = pheno[".event"].to_numpy(float)[unit_first]
@@ -476,52 +545,59 @@ def _survival(
         raise RuntimeError("the null Cox model did not converge.")
     M = np.full(len(time), np.nan)
     M[ok_u] = null["martingale"]
-    rr = radii[0]
-    g = _cell.cell_graph(
-        ctx,
-        pairs,
-        r=None if np.isnan(rr) else rr,
-        k=k,
-        label_clustering=False,
-        n_threads=cores,
-        effect=effect,
-    )
-    g.image_heterogeneity = True
-    fits, rows = [], []
     ev = np.where(np.isfinite(event), event, 0).astype(np.int32)
-    for f, t in pairs:
-        rws = _cell.cell_rows(ctx, g, f, t)
-        m = len(ctx.unit_labels)
-        u = _core.survival_test(rws, rws["unit"], m, M, time, ev, np.zeros(0))
-        x = _cell._share(ctx, rws, f) if adjust else np.zeros(0)
-        # the adjusted test only where the unadjusted one was done (not where the excess has no variation: no_variation)
-        shared = not (u["ok"] and len(x) > 1 and np.var(x, ddof=1) > 0)
-        s = u if shared else _core.survival_test(rws, rws["unit"], m, M, time, ev, x)
-        parts = ([] if shared else ["abundance"]) + ([] if covariates is None else ["covariates"])
-        fits.append({"from": f, "to": t, "ok": s["ok"], "reason": s["reason"], "rows": rws, "surv": s})
-        if s["ok"]:
-            rows.append(
-                _cell.add_side(
-                    {
-                        "from": f,
-                        "to": t,
-                        "score_coefficient": s["score_coef"],
-                        "score_se": s["score_se"],
-                        "score_df": s["score_df"],
-                        "p_value": s["score_p"],
-                        "hazard_ratio_sd": s["hr_sd"],
-                        "log_hr_sd": s["log_hr_sd"],
-                        "log_hr_se": s["hr_se"],
-                        "hr_p_value": s["hr_p"],
-                        "log_hr_per_unit": s["log_hr_unit"],
-                        "tau2": s["tau2"],
-                        "adjusted_for": "+".join(parts) or "none",
-                        "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
-                        "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan,
-                    },
-                    fits[-1],
-                )
+    return {"M": M, "time": time, "event": ev}
+
+
+def _survival_test(ctx, rows, f, t, sv, adjust, covariates):
+    """The survival test of one pair on given image rows."""
+    m = len(ctx.unit_labels)
+    u = _core.survival_test(rows, rows["unit"], m, sv["M"], sv["time"], sv["event"], np.zeros(0))
+    x = _cell._share(ctx, rows, f) if adjust else np.zeros(0)
+    # the adjusted test only where the unadjusted one was done (not where the excess has no variation: no_variation)
+    shared = not (u["ok"] and len(x) > 1 and np.var(x, ddof=1) > 0)
+    s = u if shared else _core.survival_test(rows, rows["unit"], m, sv["M"], sv["time"], sv["event"], x)
+    parts = ([] if shared else ["abundance"]) + ([] if covariates is None else ["covariates"])
+    return {
+        "from": f,
+        "to": t,
+        "ok": s["ok"],
+        "reason": s["reason"],
+        "rows": rows,
+        "surv": s,
+        "unadjusted_surv": u,
+        "adjusted_for": "+".join(parts) or "none",
+    }
+
+
+def _survival_table(fits, adjust, covariates):
+    rows = []
+    for o in fits:
+        s, u = o["surv"], o["unadjusted_surv"]
+        if not s["ok"]:
+            continue
+        rows.append(
+            _cell.add_side(
+                {
+                    "from": o["from"],
+                    "to": o["to"],
+                    "score_coefficient": s["score_coef"],
+                    "score_se": s["score_se"],
+                    "score_df": s["score_df"],
+                    "p_value": s["score_p"],
+                    "hazard_ratio_sd": s["hr_sd"],
+                    "log_hr_sd": s["log_hr_sd"],
+                    "log_hr_se": s["hr_se"],
+                    "hr_p_value": s["hr_p"],
+                    "log_hr_per_unit": s["log_hr_unit"],
+                    "tau2": s["tau2"],
+                    "adjusted_for": o["adjusted_for"],
+                    "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
+                    "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan,
+                },
+                o,
             )
+        )
     tab = pd.DataFrame(rows) if rows else None
     if tab is not None:
         tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
@@ -532,7 +608,7 @@ def _survival(
         if not adjust and covariates is None:
             tab = tab.drop(columns=["adjusted_for"])
         tab.index = tab["from"] + "__" + tab["to"]
-    return {"table": tab, "fits": fits}
+    return tab
 
 
 def _results(res, ctx, pheno, condition, subject, survival, radii, k, effect="count") -> SpicyResults:

@@ -273,6 +273,13 @@ PYBIND11_MODULE(_core, m) {
       .def("pair_neighbour_out_sq_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_out_sq_totals(knn)); })
       .def("pair_neighbour_any_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_any_totals(knn)); })
       .def("self_any_expected", [](const Dataset& d, bool knn) { return arr(d.self_any_expected(knn)); })
+      // soft membership: a, each cell's `from` weight; cell i's `to` labels (0-based) are lab[ptr[i]:ptr[i + 1]] with
+      // weights w. Per image (image-major), 3 + 4 n_labels values: L, Q, M, then per label O, sum b, sum b^2, sum b
+      .def("weighted_excess_sums", [](const Dataset& d, const DoubleArray& a, const IntArray& ptr, const IntArray& lab,
+                                      const DoubleArray& w, int n_labels, bool allocation) {
+        return arr(d.weighted_excess_sums(vec<double>(a), vec<int>(ptr), vec<int>(lab), vec<double>(w), n_labels,
+                                          allocation));
+      }, py::arg("a"), py::arg("ptr"), py::arg("lab"), py::arg("w"), py::arg("n_labels"), py::arg("allocation"))
       // several radii from one neighbour search: per radius (any, self_expected) or (totals, sq), as the single-radius calls
       .def("multi_radius_totals", [](Dataset& d, const DoubleArray& radii, bool allocation) {
         Dataset::MultiRadiusTotals m = d.multi_radius_totals(vec<double>(radii), allocation);
@@ -312,6 +319,14 @@ PYBIND11_MODULE(_core, m) {
                                          n_images, from, to, vec<double>(psi), groups(image_group)));
   }, py::arg("any_totals"), py::arg("self_expected"), py::arg("counts"), py::arg("n_types"), py::arg("from_"),
      py::arg("to"), py::arg("psi"), py::arg("image_group") = py::none());
+
+  // sums: Dataset.weighted_excess_sums (images x (3 + 4 n_labels), image-major); to: 0-based label
+  m.def("weighted_image_rows", [groups](const DoubleArray& sums, int n_labels, int to, bool allocation,
+                                        const py::object& image_group) {
+    const int n_images = static_cast<int>(sums.size() / (3 + 4 * static_cast<std::size_t>(n_labels)));
+    std::vector<int> ig = groups(image_group);
+    return rows_to(weighted_image_rows(sums.data(), n_images, n_labels, to, allocation, ig.empty() ? nullptr : ig.data()));
+  }, py::arg("sums"), py::arg("n_labels"), py::arg("to"), py::arg("allocation"), py::arg("image_group") = py::none());
 
   m.def("image_heterogeneity_rows", [](const py::dict& rows, const IntArray& unit) {
     double tau2 = 0;

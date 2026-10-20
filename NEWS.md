@@ -1,5 +1,18 @@
 # spicyr news
 
+## 1.99.26
+
+- Cell weights: `spicy(cell_weights=, weight_labels=)` takes weights in [0, 1], in the order of the cells: a 1-D
+  array (numpy array, list or pandas Series) with one weight per cell for its own cell type, for example a quality
+  score, or a cells x labels matrix of soft cell type membership (a pandas DataFrame, whose columns are the labels,
+  or a numpy array or scipy sparse matrix with `weight_labels`), for example a classifier's confidence. A 1-D array
+  is the same as the cells x cell types matrix with each cell's weight in its own type's column. With a matrix,
+  `from_` and `to` name labels, which may overlap. A `to` cell counts with its weight, its score is the chance that
+  it has a `from` neighbour within `r` if the labels were drawn from the weights (allocation) or the summed `from`
+  weight of its neighbours (count), and the null shuffles the `to` weights over the cells whose `from` weight is
+  below 1. 0/1 weights give the cell-type results. One radius, cells in memory; pairs of a label with itself are not
+  tested. As spicyR 1.99.32 (core synced from it).
+
 ## 1.99.25
 
 - A radius is now not tested when a condition's effective patients fall below min(3, m_g / 2), where m_g is the number

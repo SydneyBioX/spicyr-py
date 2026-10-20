@@ -8,7 +8,7 @@ two give the same numbers.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 import pandas as pd
@@ -78,6 +78,8 @@ class Context:
     levels: list | None = None
     image_group: np.ndarray | None = None
     images: pd.DataFrame | None = None  # one row per image (index: image IDs) for columns not in the cell table
+    ord: np.ndarray | None = None  # the Dataset's rows (ctx.data), as rows of the cells
+    cells_per_image: np.ndarray | None = None  # soft membership: each image's number of cells (counts are weights)
 
     def has(self, name) -> bool:
         return self.source.has(name) or (self.images is not None and name in self.images.columns)
@@ -250,6 +252,7 @@ def cell_context(
         x, y = src.coords(order)
         tc = src.type_codes[order].astype(np.int64)
         tc[tc < 0] = n_tcodes
+        ctx.ord = order
         offsets = np.concatenate([[0], np.cumsum(ctx.counts.sum(axis=1))]).astype(np.int32)
         ctx.data = _core.Dataset(
             np.asarray(x, float), np.asarray(y, float), ctx.type_map[tc], offsets, len(ctx.type_labels)
@@ -430,6 +433,138 @@ def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     return rows
 
 
+def is_weight_vector(weights) -> bool:
+    """Whether cell weights are a 1-D array (one weight per cell for its own cell type) rather than a matrix."""
+    import scipy.sparse as sp
+
+    return not isinstance(weights, pd.DataFrame) and not sp.issparse(weights) and np.ndim(weights) == 1
+
+
+def membership(weights, n_cells, labels=None, type_codes=None, type_labels=None, code_labels=None):
+    """Soft cell type membership as a CSR matrix (cells x labels, explicit zeros removed) and its labels.
+
+    ``weights`` is a DataFrame (its columns are the labels), or a numpy array or scipy sparse matrix with ``labels``,
+    with one row per cell; or a 1-D array (numpy array, list or pandas Series) with one weight per cell for its own
+    cell type, which gives the cells x cell types matrix with each cell's weight in its type's column. The labels are
+    then ``type_labels`` (the cell types in the order of the hard-label path), and ``type_codes`` and ``code_labels``
+    give each cell's type (code -1 is missing: such a cell has no weight). Weights are in [0, 1], as spicyR's
+    ``.membership()``.
+    """
+    import scipy.sparse as sp
+
+    if is_weight_vector(weights):
+        w = np.asarray(weights.to_numpy() if isinstance(weights, pd.Series) else weights)
+        if not (np.issubdtype(w.dtype, np.number) or w.dtype == bool):
+            raise ValueError("`cell_weights` must be numeric.")
+        w = w.astype(float)
+        if len(w) != n_cells:
+            raise ValueError(
+                f"`cell_weights` has {len(w)} values but there are {n_cells} cells (one per cell, in the order of "
+                "`cells`)."
+            )
+        if not np.all(np.isfinite(w)) or np.any(w < 0) or np.any(w > 1):
+            raise ValueError("`cell_weights` must be between 0 and 1, with no missing values.")
+        labels = [str(v) for v in type_labels if not (isinstance(v, float) and np.isnan(v))]
+        pos = {v: i for i, v in enumerate(labels)}
+        col_of_code = np.array([pos.get(str(v), -1) for v in code_labels] + [-1], dtype=np.int64)
+        j = col_of_code[np.asarray(type_codes, dtype=np.int64)]  # code -1 picks the trailing -1
+        keep = (j >= 0) & (w != 0)
+        m = sp.csr_matrix((w[keep], (np.flatnonzero(keep), j[keep])), shape=(n_cells, len(labels)))
+        m.sort_indices()
+        return m, labels
+    if isinstance(weights, pd.DataFrame):
+        if labels is None:
+            labels = list(weights.columns)
+        weights = weights.to_numpy()
+    if labels is None:
+        raise ValueError("`cell_weights` needs labels: a DataFrame's columns, or `weight_labels`.")
+    labels = [str(v) for v in labels]
+    if len(set(labels)) != len(labels) or any(v == "" for v in labels):
+        raise ValueError("`cell_weights` needs unique, non-empty labels.")
+    if sp.issparse(weights):
+        m = sp.csr_matrix(weights, dtype=float)
+    else:
+        a = np.asarray(weights)
+        if a.ndim != 2 or not (np.issubdtype(a.dtype, np.number) or a.dtype == bool):
+            raise ValueError("`cell_weights` must be a numeric 2-d array, DataFrame or scipy sparse matrix.")
+        m = sp.csr_matrix(a.astype(float))
+    if m.shape[1] != len(labels):
+        raise ValueError(f"`cell_weights` has {m.shape[1]} columns but {len(labels)} labels.")
+    if m.shape[0] != n_cells:
+        raise ValueError(
+            f"`cell_weights` has {m.shape[0]} rows but there are {n_cells} cells "
+            "(one row per cell, in the order of `cells`)."
+        )
+    m.eliminate_zeros()
+    m.sort_indices()
+    if not np.all(np.isfinite(m.data)) or np.any(m.data < 0) or np.any(m.data > 1):
+        raise ValueError("`cell_weights` must be between 0 and 1, with no missing values.")
+    return m, labels
+
+
+def weighted_context(ctx: Context, memb, labels) -> Context:
+    """The context of the tests with soft membership.
+
+    Counts are each label's summed weight per image (for the abundance share), over the image's number of cells
+    (labels may overlap).
+    """
+    coo = memb.tocoo()
+    img = ctx.image_map[ctx.source.image_codes][coo.row]
+    counts = np.zeros((ctx.n_images, len(labels)))
+    np.add.at(counts, (img, coo.col), coo.data)
+    return replace(ctx, counts=counts, type_labels=list(labels), cells_per_image=ctx.counts.sum(axis=1))
+
+
+def cell_weighted(
+    ctx, memb, labels, pairs, r, effect, variance, adjust, Z_extra, extra_names=(), survival_test=None
+) -> dict:
+    """spicy() with soft cell type membership (cell_weights).
+
+    For each ``from`` label, one neighbour pass gives the weighted random-labelling sums of every ``to`` label
+    (Dataset.weighted_excess_sums); each pair's image rows then go through the side, the image random effect and the
+    test as cell_pair_test() takes them for cell types. With 0/1 weights the results are those of the cell types.
+    Self-pairs are not tested. ``survival_test(wctx, rows, f, t)``, if given, replaces the condition test.
+    """
+    allocation = effect == "allocation"
+    ctx.data.build_radius_index(float(r))
+    K = len(labels)
+    rows_in_order = memb[ctx.ord]
+    ptr = rows_in_order.indptr.astype(np.int32)
+    lab = rows_in_order.indices.astype(np.int32)
+    w = rows_in_order.data.astype(float)
+    pairs = [p for p in pairs if p[0] != p[1]]
+    if not pairs:
+        raise ValueError("with `cell_weights`, `from_` and `to` must give at least one pair of different labels.")
+    wctx = weighted_context(ctx, memb, labels)
+    ig = None if ctx.image_group is None else np.asarray(ctx.image_group, dtype=np.int32)
+    fits = [None] * len(pairs)
+    for f in dict.fromkeys(p[0] for p in pairs):
+        a = memb[:, labels.index(f)].toarray().ravel()
+        sums = ctx.data.weighted_excess_sums(a[ctx.ord], ptr, lab, w, K, allocation)
+        for k in [k for k, p in enumerate(pairs) if p[0] == f]:
+            t = pairs[k][1]
+            rows = _core.weighted_image_rows(sums, K, labels.index(t), allocation, ig)
+            rows["unit"] = ctx.image_unit[rows["img"]].astype(np.int32)
+            if ctx.image_group is not None:
+                rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)
+            side = None
+            if allocation:
+                side = "avoid" if float(np.sum(rows["O"] - rows["E"])) < 0 else "attract"
+            if len(rows["O"]):
+                h = _core.image_heterogeneity_rows(rows, rows["unit"])
+                for key in ("unit", "group"):
+                    if key in rows:
+                        h[key] = rows[key]
+                rows = h
+            if side is not None:
+                rows["side"] = side
+            if survival_test is not None:
+                fits[k] = survival_test(wctx, rows, f, t)
+            else:
+                fits[k] = cell_rows_test(wctx, rows, f, t, True, variance, adjust, Z_extra, extra_names)
+    return {"fits": fits}
+
+
 def _subset_rows(rows, keep) -> dict:
     return {k: (v[keep] if isinstance(v, np.ndarray) else v) for k, v in rows.items()}
 
@@ -447,7 +582,8 @@ def add_side(row: dict, o: dict) -> dict:
 def _share(ctx, rows, f):
     """The log share of the counted type in each image row (the abundance covariate)."""
     i = rows["img"]
-    return np.log(np.maximum(ctx.counts[i, ctx.type_labels.index(f)], 0.5) / ctx.counts.sum(axis=1)[i])
+    total = ctx.counts.sum(axis=1) if ctx.cells_per_image is None else ctx.cells_per_image
+    return np.log(np.maximum(ctx.counts[i, ctx.type_labels.index(f)], 0.5) / total[i])
 
 
 def _design(ctx, rows, f, adjust, Z_extra, extra_names):
@@ -535,7 +671,11 @@ def _no_information(rows, G) -> bool:
 
 
 def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_names=()) -> dict:
-    rows = cell_rows(ctx, g, f, t)
+    return cell_rows_test(ctx, cell_rows(ctx, g, f, t), f, t, frailty, variance, adjust, Z_extra, extra_names)
+
+
+def cell_rows_test(ctx, rows, f, t, frailty, variance, adjust, Z_extra=None, extra_names=()) -> dict:
+    """The test of one pair on given image rows."""
     if len(ctx.levels) > 2:
         return cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names)
     m = len(ctx.unit_labels)
