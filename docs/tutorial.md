@@ -96,37 +96,31 @@ Ki67+ marks proliferating cells, so `HR- Ki67+` are proliferating hormone-recept
 
 `spicyr.datasets.metabric_ali2020()` downloads the data once (130 MB) and caches it. We ask for an AnnData object:
 one observation per cell, with the clinical data in `obs` and the coordinates, in micrometres, in
-`obsm["spatial"]`.
+`obsm["spatial"]`. The ER status of each patient is in `ER.Status`, `neg` or `pos`; we keep the patients whose ER
+status is known.
 
 ```{code-cell} ipython3
 adata = spicyr.datasets.metabric_ali2020(as_anndata=True)
-adata = adata[adata.obs["ER.Status"].isin(["neg", "pos"])].copy()
-adata.obs["ER"] = pd.Categorical(adata.obs["ER.Status"].map({"neg": "ER-", "pos": "ER+"}), categories=["ER-", "ER+"])
+adata = adata[adata.obs["ER.Status"].notna()].copy()  # the 456 patients with known ER status
+
+# spicyr looks for columns called imageID and cellType by default. Copying the dataset's columns to these names is
+# not needed (you can give image_id="file_id", cell_type="description" to each call instead); it only keeps the
+# calls below short.
+adata.obs["imageID"] = adata.obs["file_id"]
+adata.obs["cellType"] = adata.obs["description"]
 adata
 ```
 
 ```{code-cell} ipython3
-print(adata.obs.drop_duplicates("metabricId")["ER"].value_counts().sort_index())
-adata.obs["description"].value_counts()
+print(adata.obs.drop_duplicates("metabricId")["ER.Status"].value_counts())  # patients by ER status
+adata.obs["cellType"].value_counts()
 ```
 
 ```{code-cell} ipython3
-types = sorted(adata.obs["description"].unique())
-palette = dict(zip(types, plt.cm.tab20(np.linspace(0, 1, 20)).tolist() + [[0.2, 0.2, 0.2, 1], [0.6, 0.4, 0.1, 1]]))
-size = adata.obs["file_id"].value_counts()                      # show the largest core of each group
-two_cores = [size[adata.obs.loc[adata.obs["ER"] == g, "file_id"].unique()].idxmax() for g in ["ER-", "ER+"]]
-
-fig, axes = plt.subplots(1, 2, figsize=(11, 4.8))
-for ax, core in zip(axes, two_cores):
-    sub = adata[adata.obs["file_id"] == core]
-    xy = sub.obsm["spatial"]
-    ax.scatter(xy[:, 0], xy[:, 1], s=2, c=sub.obs["description"].map(palette).tolist())
-    ax.set_title(f"{core} ({sub.obs['ER'].iloc[0]})")
-    ax.set_aspect("equal")
-    ax.axis("off")
-handles = [plt.Line2D([], [], marker="o", ls="", color=palette[t], label=t) for t in types]
-fig.legend(handles=handles, fontsize=7, loc="center left", bbox_to_anchor=(0.92, 0.5), frameon=False)
-plt.subplots_adjust(right=0.9)
+fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+for ax, core in zip(axes, ["MB0869_1_366", "MB0501_1_222"], strict=True):  # an ER- and an ER+ core
+    spicyr.plot_image(adata, core, ax=ax)
+plt.tight_layout()
 ```
 
 ## Testing every pair of cell types
@@ -142,8 +136,7 @@ are unsure, give several radii (see [Which radius?](#which-radius)).
 :::
 
 ```{code-cell} ipython3
-res = spicyr.spicy(adata, condition="ER", subject="metabricId", r=25,
-                   image_id="file_id", cell_type="description")
+res = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=25)
 res
 ```
 
@@ -246,7 +239,7 @@ d.loc[examples, ["condition", pair, "weight"]]
 ```{code-cell} ipython3
 fig, axes = plt.subplots(1, 3, figsize=(16, 5))
 for ax, image in zip(axes, examples):
-    spicyr.plot_image(adata, image, "T cells", "HR- Ki67+", r=25, image_id="file_id", cell_type="description", ax=ax)
+    spicyr.plot_image(adata, image, "T cells", "HR- Ki67+", r=25, ax=ax)
     ax.set_title(f"{image} ({d.loc[image, 'condition']}), effect {d.loc[image, pair]:.2f}")
 plt.tight_layout()
 ```
@@ -294,8 +287,7 @@ By default spicyr asks whether each `to` cell has a `from` cell nearby. With `ef
 effect is then the number of extra `from` cells within the radius of each `to` cell.
 
 ```{code-cell} ipython3
-res_count = spicyr.spicy(adata, condition="ER", subject="metabricId", r=25,
-                         image_id="file_id", cell_type="description", effect="count")
+res_count = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=25, effect="count")
 res_count.cell_results.loc[[pair], ["excess_ref", "excess_comp", "excess_difference", "p_value", "p_adj"]]
 ```
 
@@ -330,8 +322,7 @@ age at diagnosis and tumour grade.
 
 ```{code-cell} ipython3
 adata.obs["Grade"] = pd.Categorical(adata.obs["Grade"])
-res_cov = spicyr.spicy(adata, condition="ER", subject="metabricId", r=25,
-                       image_id="file_id", cell_type="description",
+res_cov = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=25,
                        covariates=["Age.At.Diagnosis", "Grade"])
 res_cov
 ```
@@ -365,8 +356,7 @@ smooth range of radii, which stays close to the exact max-T when neighbouring ra
 `combine="cauchy"` is another alternative.
 
 ```{code-cell} ipython3
-res_r = spicyr.spicy(adata, condition="ER", subject="metabricId", r=[10, 25, 50, 75],
-                     image_id="file_id", cell_type="description")
+res_r = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=[10, 25, 50, 75])
 res_r.cell_results.loc[[pair, "B cells__HR- Ki67+"], ["r", "excess_difference", "p_value"]]
 ```
 
@@ -394,8 +384,7 @@ With `survival=(time, event)`, spicyr asks whether a patient's effect is associa
 relapse-free survival, adjusting for age.
 
 ```{code-cell} ipython3
-res_s = spicyr.spicy(adata, survival=("timeRFS", "eventRFS"), subject="metabricId", r=25,
-                     image_id="file_id", cell_type="description", covariates="Age.At.Diagnosis")
+res_s = spicyr.spicy(adata, survival=("timeRFS", "eventRFS"), subject="metabricId", r=25, covariates="Age.At.Diagnosis")
 res_s
 ```
 
@@ -413,8 +402,7 @@ type: patients in whom more of the other tumour cells sat next to `HR+ CK7-` cel
 typical of ER+ tumours, and ER status is itself related to relapse, so we add it to the covariates.
 
 ```{code-cell} ipython3
-res_s_er = spicyr.spicy(adata, survival=("timeRFS", "eventRFS"), subject="metabricId", r=25,
-                        image_id="file_id", cell_type="description", covariates=["Age.At.Diagnosis", "ER"])
+res_s_er = spicyr.spicy(adata, survival=("timeRFS", "eventRFS"), subject="metabricId", r=25, covariates=["Age.At.Diagnosis", "ER.Status"])
 res_s_er
 ```
 
@@ -424,29 +412,20 @@ No pair remains significant: these two pairs say little about relapse beyond the
 
 A test should give few significant results when there is nothing to find. Shuffling the ER labels across patients
 removes any real difference, so about 5% of pairs should then have p < 0.05, and about 1% p < 0.01.
+`calibration_check()` shuffles the condition and runs `spicy()` with the same arguments, ten times by default; here
+five, to keep this page quick to build.
 
 ```{code-cell} ipython3
-rng = np.random.default_rng(2026)
-patients = adata.obs.drop_duplicates("metabricId")[["metabricId", "ER"]]
-rows = []
-for i in range(5):
-    label = dict(zip(patients["metabricId"], rng.permutation(patients["ER"].to_numpy())))
-    adata.obs["shuffled"] = adata.obs["metabricId"].map(label).astype(str)
-    s = spicyr.spicy(adata, condition="shuffled", subject="metabricId", r=25,
-                     image_id="file_id", cell_type="description")
-    p = s.cell_results["p_value"].dropna()  # the pairs tested
-    rows += [(i, "p < 0.05", 100 * (p < 0.05).mean()), (i, "p < 0.01", 100 * (p < 0.01).mean())]
-shuffles = pd.DataFrame(rows, columns=["shuffle", "threshold", "percent"])
+shuffles = spicyr.calibration_check(adata, condition="ER.Status", subject="metabricId", r=25, n_shuffles=5, rng=2026)
 shuffles.groupby("threshold")["percent"].mean()
 ```
 
 ```{code-cell} ipython3
 fig, ax = plt.subplots(figsize=(5, 3.5))
-for k, th in enumerate(["p < 0.05", "p < 0.01"]):
-    v = shuffles.loc[shuffles["threshold"] == th, "percent"]
-    ax.scatter(k + rng.uniform(-0.08, 0.08, len(v)), v, color="black", alpha=0.7)
-    ax.hlines({"p < 0.05": 5, "p < 0.01": 1}[th], k - 0.25, k + 0.25, color="#b3261e", lw=2)
-ax.set_xticks([0, 1], ["p < 0.05", "p < 0.01"])
+for k, (th, v) in enumerate(shuffles.groupby("threshold", sort=False)["percent"]):
+    ax.scatter(np.full(len(v), k), v, color="black", alpha=0.7)
+    ax.hlines(100 * th, k - 0.25, k + 0.25, color="#b3261e", lw=2)  # expected
+ax.set_xticks([0, 1], [f"p < {th:g}" for th in shuffles["threshold"].unique()])
 ax.set(xlim=(-0.6, 1.6), ylim=(0, 15), ylabel="pairs below the threshold",
        title="5 shuffles of the ER labels (red: expected)")
 ax.yaxis.set_major_formatter(lambda v, _: f"{v:g}%")
@@ -510,44 +489,23 @@ image, so spicyr loads the image and cell-type columns once as integer codes and
 whole images at a time. Memory then depends on the size of an image and on the number of threads (`cores`), not on
 the size of the study, and the results are the same as for the same cells in memory.
 
-To make a small store, we write 20 cores of each ER group with `write_cell_store()`. It needs a DataFrame (or an
-AnnData object) with one row per cell; the image column becomes the table's region key and the coordinates its
-`obsm` array `"spatial"`. A second table holds one row per core, with the patient and ER status.
+`write_cell_store()` writes cells as a SpatialData store: a DataFrame, or an AnnData object's `obs`, becomes the
+table's `obs`, with the image column as its region key, and the coordinates its `obsm` array `"spatial"`. We write
+the whole data set, so that the results can be compared with those above.
 
 ```{code-cell} ipython3
 import tempfile
 from pathlib import Path
 
-some_cores = [c for g in ["ER-", "ER+"] for c in sorted(adata.obs.loc[adata.obs["ER"] == g, "file_id"].unique())[:20]]
-small = adata[adata.obs["file_id"].isin(some_cores)]
-small = small[np.argsort(small.obs["file_id"].to_numpy(), kind="stable")].copy()  # the rows of each core together
-core_info = small.obs.drop_duplicates("file_id").set_index("file_id")[["metabricId", "ER"]]
-xy = small.obsm["spatial"]
-path = Path(tempfile.mkdtemp()) / "metabric.zarr"
-spicyr.write_cell_store(small.obs[["file_id", "description"]].assign(x=xy[:, 0], y=xy[:, 1]), path,
-                        image_id="file_id", image_info=core_info)
-print(small.n_obs, "cells of", len(core_info), "cores")
-sorted(p.name for p in (path / "tables").iterdir() if p.is_dir())
+path = spicyr.write_cell_store(adata, Path(tempfile.mkdtemp()) / "metabric.zarr")
 ```
 
-The store holds the cells of the 40 cores in a cell table, and a table of the cores called `"images"`.
-
-`spicy()` reads the store with the arguments used above. The image column defaults to the table's region key and
-the coordinates to `obsm["spatial"]`. The condition and the patient are not columns of the cell table, so
-`image_info` names the table that holds them.
+`spicy()` reads the store with the same arguments as the object in memory, and gives the same results:
 
 ```{code-cell} ipython3
-res_store = spicyr.spicy(str(path), condition="ER", subject="metabricId", r=25, cell_type="description",
-                         image_info="images")
-```
-
-The result is that of the same cells in memory:
-
-```{code-cell} ipython3
-res_memory = spicyr.spicy(small, condition="ER", subject="metabricId", r=25, image_id="file_id",
-                          cell_type="description")
-pd.testing.assert_frame_equal(res_store.cell_results, res_memory.cell_results, check_exact=True)
-res_store.cell_results.equals(res_memory.cell_results)
+res_store = spicyr.spicy(str(path), condition="ER.Status", subject="metabricId", r=25)
+pd.testing.assert_frame_equal(res_store.cell_results, res.cell_results, check_exact=True)
+res_store.cell_results.equals(res.cell_results)
 ```
 
 Every estimate, standard error and p-value is identical, not just close. The spatialdata package reads the same
@@ -557,7 +515,7 @@ store as a SpatialData object, which `spicy()` analyses in the same way:
 import spatialdata as sd
 
 sdata = sd.read_zarr(path)
-res = spicyr.spicy(sdata, condition="ER", subject="metabricId", r=25, cell_type="description", image_info="images")
+res = spicyr.spicy(sdata, condition="ER.Status", subject="metabricId", r=25)
 ```
 
 A few arguments matter for stores. `table_key` chooses the cell table of a SpatialData store or object (by default

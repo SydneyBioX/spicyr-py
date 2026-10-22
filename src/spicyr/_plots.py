@@ -23,8 +23,8 @@ def _density(ax, x, y, bins=100):
 def plot_image(
     cells,
     image,
-    from_,
-    to,
+    from_=None,
+    to=None,
     r=None,
     image_id="imageID",
     cell_type="cellType",
@@ -33,9 +33,11 @@ def plot_image(
     ax=None,
     **kwargs,
 ):
-    """Plot one image, showing the ``from_`` and ``to`` cells of a pair.
+    """Plot one image, showing its cell types or the ``from_`` and ``to`` cells of a pair.
 
-    The density of all cells is shown in blue, with the ``from_`` cells (gold) and ``to`` cells (dark red) on top.
+    Without ``from_`` and ``to``, every cell is shown, coloured by its cell type, with the same colour for a cell type
+    in every image of ``cells``. With them, the density of all cells is shown in blue, with the ``from_`` cells
+    (gold) and ``to`` cells (dark red) on top.
     With ``r``, a circle of radius ``r`` is drawn around each ``to`` cell: the ``from_`` cells inside the circles
     are those that :func:`spicyr.spicy` counts.
 
@@ -46,7 +48,7 @@ def plot_image(
     image
         The image to plot (a value of the ``image_id`` column).
     from_, to
-        The two cell types (``from`` also works as a keyword).
+        The two cell types (``from`` also works as a keyword). Optional, together.
     r
         Optional radius of the circles around the ``to`` cells, in the units of the coordinates.
 
@@ -66,11 +68,17 @@ def plot_image(
     z = df[df["imageID"].astype(str) == str(image)]
     if z.empty:
         raise ValueError(f"image {image!r} not found in the {image_id!r} column.")
+    if (from_ is None) != (to is None):
+        raise ValueError("give both `from_` and `to`, or neither.")
+    if from_ is None and r is not None:
+        raise ValueError("`r` draws circles around the `to` cells: give `from_` and `to`.")
+    ax = ax or plt.figure(figsize=(5.5, 5)).gca()
+    if from_ is None:
+        return _cell_types(ax, df, z, image)
     types = set(df["cellType"].astype(str))
     bad = [t for t in (from_, to) if t not in types]
     if bad:
         raise ValueError(f"cell type not found: {bad}")
-    ax = ax or plt.figure(figsize=(5.5, 5)).gca()
     _density(ax, z["x"].to_numpy(float), z["y"].to_numpy(float))
     ct = z["cellType"].astype(str)
     f, t = z[ct == from_], z[ct == to]
@@ -89,5 +97,27 @@ def plot_image(
     ax.set_aspect("equal")
     ax.set_title(str(image))
     ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1, 1), markerscale=2)
+    ax.spines[["top", "right"]].set_visible(False)
+    return ax
+
+
+def _cell_types(ax, df, z, image):
+    """Every cell of image ``z``, coloured by cell type.
+
+    The colours come from all the cell types of ``df``, so a cell type has the same colour in every image.
+    """
+    import matplotlib.pyplot as plt
+
+    types = sorted(df["cellType"].astype(str).unique())
+    colours = [*plt.cm.tab20.colors, *plt.cm.tab20b.colors, *plt.cm.tab20c.colors]
+    palette = {t: colours[k % len(colours)] for k, t in enumerate(types)}
+    ct = z["cellType"].astype(str)
+    for t in types:
+        if (ct == t).any():
+            w = (ct == t).to_numpy()
+            ax.scatter(z["x"].to_numpy()[w], z["y"].to_numpy()[w], s=2, color=palette[t], label=t)
+    ax.set_aspect("equal")
+    ax.set_title(str(image))
+    ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1, 1), markerscale=3, fontsize=7)
     ax.spines[["top", "right"]].set_visible(False)
     return ax

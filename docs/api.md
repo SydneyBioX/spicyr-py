@@ -6,6 +6,12 @@
 .. autofunction:: spicyr.spicy
 ```
 
+## Checking calibration
+
+```{eval-rst}
+.. autofunction:: spicyr.calibration_check
+```
+
 ## Writing a store
 
 ```{eval-rst}

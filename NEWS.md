@@ -1,5 +1,19 @@
 # spicyr news
 
+## 1.99.27
+
+- `calibration_check()` shuffles the condition (or the survival time and event together) across patients, or across
+  images without `subject`, runs `spicy()` on each shuffle and reports the percentage of pairs below each p-value
+  threshold: the check the tutorial recommends before trusting a discovery. Patients without a condition keep it
+  missing, a categorical condition keeps its categories, and the input is left as it was. As spicyR 1.99.37's
+  `calibrationCheck()`.
+- `plot_image()` without `from_` and `to` shows every cell of the image, coloured by its cell type, with the same
+  colour for a cell type in every image (as spicyR's `plotImage()` since 1.99.33).
+- The tutorial is simpler: `imageID` and `cellType` are set once (noted as optional), `ER.Status` is used as it is
+  (`neg` is the reference), the two example cores are named and
+  drawn with `plot_image()`, the shuffles use `calibration_check()`, and the store section writes the whole data set
+  and compares with the results in memory.
+
 ## 1.99.26
 
 - Cell weights: `spicy(cell_weights=, weight_labels=)` takes weights in [0, 1], in the order of the cells: a 1-D
