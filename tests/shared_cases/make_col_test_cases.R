@@ -11,6 +11,8 @@ write(getProp(cells, feature = "cellType", imageID = "patient"), "prop_patient")
 write(colTest(sce, condition = "condition", feature = "cellType", imageID = "patient", type = "wilcox"), "wilcox_patient")
 write(colTest(sce, condition = "condition", feature = "cellType", imageID = "imageID", type = "wilcox"), "wilcox_image")
 write(colTest(sce, condition = "condition", feature = "cellType", imageID = "imageID"), "ttest_image")
+# patients as the units through `subject` (each patient's cells, all images pooled)
+write(colTest(sce, condition = "condition", feature = "cellType", subject = "patient", type = "wilcox"), "wilcox_subject")
 # normal approximation: proportions rounded to two decimals have ties
 props <- getProp(cells, feature = "cellType", imageID = "imageID")
 cond <- unique(cells[, c("imageID", "condition")])

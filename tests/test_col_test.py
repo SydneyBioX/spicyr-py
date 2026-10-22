@@ -51,6 +51,25 @@ def test_cells(name, image_id, type):
     same(got, expected(name))
 
 
+def test_subject_pools_each_patient():
+    got = spicyr.col_test(CELLS, condition="condition", feature="cellType", subject="patient", type="wilcox")
+    same(got, expected("wilcox_subject"))
+    same(got, expected("wilcox_patient"))
+
+
+def test_rows_matched_to_a_named_condition():
+    props = spicyr.get_prop(CELLS, feature="cellType", image_id="imageID")
+    cond = CELLS.drop_duplicates("imageID").set_index("imageID")["condition"]
+    shuffled = cond.sample(frac=1, random_state=1)
+    same(spicyr.col_test(props, shuffled, type="wilcox"), spicyr.col_test(props, cond.loc[props.index], type="wilcox"))
+    # an index that holds no row names of props: taken in row order, as before
+    aligned = cond.loc[props.index]
+    same(
+        spicyr.col_test(props, aligned.set_axis([f"x{i}" for i in range(len(aligned))]), type="wilcox"),
+        spicyr.col_test(props, aligned.to_numpy(), type="wilcox"),
+    )
+
+
 def test_wilcox_with_ties():
     props = spicyr.get_prop(CELLS, feature="cellType", image_id="imageID").round(2)
     cond = CELLS.drop_duplicates("imageID").set_index("imageID")["condition"]

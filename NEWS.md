@@ -1,5 +1,17 @@
 # spicyr news
 
+## 1.99.28
+
+- `col_test()` takes `subject`: with a table of cells and `feature`, the proportions are then those of each
+  patient's cells, all images pooled, and each patient is one unit of the test. As spicyR 1.99.38.
+- `col_test(type="wilcox")` reports the median in each group (`"median in group <level>"`), as the t-test reports
+  the means.
+- `col_test()` matches the rows of `df` to a `condition` Series or DataFrame whose index holds row names of `df`,
+  and leaves out rows without a condition; otherwise the condition is taken in row order, as before.
+- Values are rounded to two significant digits exactly as R's `signif()` does (scale, round half to even,
+  unscale), so the few values that fall on a tie in floating point (such as 0.205000...02, which R rounds to 0.2)
+  now match R as well; checked on 2,006 values against R.
+
 ## 1.99.27
 
 - `calibration_check()` shuffles the condition (or the survival time and event together) across patients, or across

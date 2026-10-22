@@ -70,9 +70,26 @@ def get_prop(cells, feature="cellType", image_id="imageID") -> pd.DataFrame:
     return tab.div(tab.sum(axis=1), axis=0)
 
 
+def _signif1(v: float, digits: int) -> float:
+    """R's signif() for one value (fprec() in R's nmath): scale by a power of ten, round half to even, unscale.
+
+    Scaling in floating point is what R does, so a value such as 0.205000...02 becomes 0.2, as in R, where a
+    correctly rounded decimal would give 0.21.
+    """
+    if not np.isfinite(v) or v == 0:
+        return v
+    sgn, x = (-1.0 if v < 0 else 1.0), abs(v)
+    e10 = int(digits - 1 - math.floor(math.log10(x)))
+    if e10 > 0:
+        p10 = 10.0**e10
+        return sgn * (float(np.rint(x * p10)) / p10)
+    p10 = 10.0 ** (-e10)
+    return sgn * (float(np.rint(x / p10)) * p10)
+
+
 def _signif(x, digits=2):
     x = np.asarray(x, dtype=float)
-    return np.array([float(f"{v:.{digits}g}") if np.isfinite(v) else v for v in x.ravel()]).reshape(x.shape)
+    return np.array([_signif1(v, digits) for v in x.ravel()]).reshape(x.shape)
 
 
 def _pnorm(z: float) -> float:
@@ -183,7 +200,7 @@ def _cox(values: np.ndarray, time: np.ndarray, event: np.ndarray) -> tuple[float
         return np.nan, np.nan, np.nan
 
 
-def col_test(df, condition, type=None, feature=None, image_id="imageID") -> pd.DataFrame:
+def col_test(df, condition, type=None, feature=None, image_id="imageID", subject=None) -> pd.DataFrame:
     """Test each column of a table, such as proportions per image, as spicyR's ``colTest()``.
 
     Each column is tested for a difference between two groups (Wilcoxon or Welch t-test) or for an association
@@ -196,19 +213,25 @@ def col_test(df, condition, type=None, feature=None, image_id="imageID") -> pd.D
         :func:`get_prop`. With ``feature`` given, ``df`` is instead a table of cells (a DataFrame or an AnnData
         object), and the proportions of ``feature`` in each ``image_id`` are computed first.
     condition
-        The group of each row of ``df`` (a sequence or Series in its row order), or two columns ``(time,
-        event)`` for survival. With ``feature``, the name of the cells' group column.
+        The group of each row of ``df``, or two columns ``(time, event)`` for survival. A Series or DataFrame
+        whose index holds row names of ``df`` is matched to the rows by name (rows without a condition are left
+        out); otherwise the condition is taken in the row order of ``df``. With
+        ``feature``, the name of the cells' group column.
     type
         ``"wilcox"``, ``"ttest"`` or ``"survival"``; by default ``"ttest"`` for one condition and
         ``"survival"`` for two columns.
     feature
         The column of the cells whose proportions are tested, e.g. cell types or regions.
     image_id
-        With ``feature``: the units, images or patients (to pool the images of each patient).
+        With ``feature``: the column of the images.
+    subject
+        With ``feature``, optional: the column of the patient. The proportions are then those of each patient's
+        cells, all images pooled, and each patient is one unit of the test.
 
     Returns
     -------
-    A DataFrame with one row per column of ``df``, ordered by p-value: the group means (t-test), the test
+    A DataFrame with one row per column of ``df``, ordered by p-value: the group means (t-test) or medians
+    (Wilcoxon test), the test
     statistic (``tval.W``, ``tval.t``) or the Cox coefficient and its standard error (survival), the p-value
     (``pval``), the Benjamini-Hochberg adjusted p-value (``adjPval``) and the column name (``cluster``), all
     rounded to two significant digits as in R.
@@ -216,6 +239,7 @@ def col_test(df, condition, type=None, feature=None, image_id="imageID") -> pd.D
     """
     if feature is not None:
         obs = _obs(df)
+        image_id = subject if subject is not None else image_id  # the unit: the patient, or else the image
         if type is None:
             type = "ttest" if isinstance(condition, str) else "survival"
         if type == "survival":
@@ -226,6 +250,12 @@ def col_test(df, condition, type=None, feature=None, image_id="imageID") -> pd.D
         df = get_prop(obs, feature=feature, image_id=image_id)
         condition = group.loc[df.index]
     else:
+        # rows matched to a condition whose index holds row names of `df`; otherwise, as before, the condition is
+        # taken in the row order of `df`
+        if isinstance(condition, (pd.Series, pd.DataFrame)):
+            keep = [i for i in df.index if i in condition.index]
+            if keep:
+                df, condition = df.loc[keep], condition.loc[keep]
         cond = condition.to_numpy() if isinstance(condition, (pd.Series, pd.DataFrame)) else np.asarray(condition)
         if len(cond) != len(df):
             raise ValueError("Number of oberservation does not match between df and outcome")
@@ -250,12 +280,13 @@ def col_test(df, condition, type=None, feature=None, image_id="imageID") -> pd.D
             v = values[:, j]
             x = v[(g == levels[0]) & np.isfinite(v)]
             y = v[(g == levels[1]) & np.isfinite(v)]
-            rows.append(_wilcox(x, y) if type == "wilcox" else _ttest(x, y))
-        cols = (
-            ["tval.W", "pval"]
-            if type == "wilcox"
-            else [f"mean in group {levels[0]}", f"mean in group {levels[1]}", "tval.t", "pval"]
-        )
+            if type == "wilcox":  # with the median of each group, as R's tapply(x, g, median)
+                rows.append((np.median(v[g == levels[0]]), np.median(v[g == levels[1]]), *_wilcox(x, y)))
+            else:
+                rows.append(_ttest(x, y))
+        stat = ["tval.W", "pval"] if type == "wilcox" else ["tval.t", "pval"]
+        summary = "median" if type == "wilcox" else "mean"
+        cols = [f"{summary} in group {levels[0]}", f"{summary} in group {levels[1]}", *stat]
         test = pd.DataFrame(_signif(np.array(rows)), index=df.columns, columns=cols)
     test["adjPval"] = _signif(p_adjust_bh(test["pval"].to_numpy()))
     test["cluster"] = test.index
