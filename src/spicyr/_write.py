@@ -301,6 +301,8 @@ def _write_anndata_parts(table, adata, ch, spatial_written):
         ("varp", adata.varp),
     ):
         for k, v in mapping.items():
+            if k is None:  # anndata >= 0.13 lists X among the layers, as layers[None]; X is written above
+                continue
             if group == "obsm" and k == "spatial" and spatial_written:
                 raise ValueError("obsm has a 'spatial' array as well as the coordinate columns of obs.")
             write_elem(table[group], k, v, dataset_kwargs=_write_kwargs(v, ch))

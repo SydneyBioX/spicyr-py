@@ -1,5 +1,11 @@
 # spicyr news
 
+## 1.99.30
+
+- `write_cell_store()` works with anndata 0.13, which lists `X` among the layers (as `layers[None]`); `X` was
+  written a second time there and failed. Tested with anndata 0.13.4, zarr 3.4.1 and pandas 3.0.6 (as CI) and
+  with anndata 0.12.19.
+
 ## 1.99.29
 
 - `write_cell_store()` writes an AnnData object whole, as spicyR's `writeCellStore()` writes a SpatialExperiment:
