@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 
 _ZARR_MISSING = 'writing a store needs zarr (version 3 or later): pip install "spicyr[store]"'
+_ARROW_MISSING = 'writing the cells as points needs pyarrow: pip install "spicyr[store]" (or points=False)'
 
 
 def _zarr():
@@ -269,6 +270,119 @@ def _regions(img, n, ch):
     return list(seen)
 
 
+def _write_kwargs(value, ch):
+    """Chunks for anndata's write_elem(): rows of a dense matrix (about `ch` values per chunk), or `ch` values."""
+    if isinstance(value, np.ndarray) and value.ndim == 2:
+        return {"chunks": (max(1, min(len(value), (2 * ch) // max(1, value.shape[1]))), value.shape[1])}
+    if isinstance(value, np.ndarray) and value.ndim == 1:
+        return {"chunks": (max(1, min(len(value), ch)),)}
+    if hasattr(value, "tocsr"):  # a sparse matrix: its data and indices arrays
+        return {"chunks": (ch,)}
+    return {}
+
+
+def _write_anndata_parts(table, adata, ch, spatial_written):
+    """X, layers, var, obsm, varm, obsp, varp and uns of an AnnData object, with anndata's own writer.
+
+    The table's obs (with the region key and instance IDs) is spicyr's; everything else is written as anndata
+    writes it, chunked. `spatial_written`: whether obsm "spatial" was written from obs columns.
+    """
+    from anndata.io import write_elem
+
+    del table["var"]
+    write_elem(table, "var", adata.var)
+    if adata.X is not None:
+        write_elem(table, "X", adata.X, dataset_kwargs=_write_kwargs(adata.X, ch))
+    for group, mapping in (
+        ("layers", adata.layers),
+        ("obsm", adata.obsm),
+        ("varm", adata.varm),
+        ("obsp", adata.obsp),
+        ("varp", adata.varp),
+    ):
+        for k, v in mapping.items():
+            if group == "obsm" and k == "spatial" and spatial_written:
+                raise ValueError("obsm has a 'spatial' array as well as the coordinate columns of obs.")
+            write_elem(table[group], k, v, dataset_kwargs=_write_kwargs(v, ch))
+    for k, v in adata.uns.items():
+        if k != "spatialdata_attrs":  # the table's own, written by spicyr
+            write_elem(table["uns"], k, v)
+
+
+def _valid_name(x):
+    """A name spatialdata accepts for an element: letters, digits, "_", "-" and ".", not "." or "..", nor "__..."."""
+    import re
+
+    return bool(re.fullmatch(r"[A-Za-z0-9_.-]+", x)) and x not in (".", "..") and not x.startswith("__")
+
+
+def _write_points(root, img, regions, x, y, n, ch):
+    """The cells as points: one points element per image.
+
+    Each element holds x, y and the instance ID that links each point to its row of the table, in the image's own
+    coordinate system. Each chunk of rows is sorted by image and each image's rows appended to that image's parquet file, so every
+    element is one file (spatialdataR reads only part.0.parquet) and memory stays that of a chunk.
+    """
+    bad = [r for r in regions if not _valid_name(r)]
+    if bad:
+        warnings.warn(
+            f"no points written: images whose IDs are not valid SpatialData element names: {bad[:5]}", stacklevel=3
+        )
+        return []
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as e:
+        raise ImportError(_ARROW_MISSING) from e
+    schema = pa.schema([("x", pa.float64()), ("y", pa.float64()), ("instance_id", pa.int64())])
+    points = root.create_group("points")
+    files = {}
+    try:
+        for a, b in _chunks(n, ch):
+            codes = pd.Categorical(np.asarray(img[a:b]).astype(object).astype(str), categories=regions).codes
+            order = np.argsort(codes, kind="stable")
+            sorted_codes = codes[order]
+            for k in np.unique(sorted_codes[sorted_codes >= 0]):
+                lo, hi = np.searchsorted(sorted_codes, [k, k + 1])
+                rows = order[lo:hi]
+                t = pa.table(
+                    {
+                        "x": np.asarray(x[a:b], float)[rows],
+                        "y": np.asarray(y[a:b], float)[rows],
+                        "instance_id": (a + rows).astype(np.int64),
+                    },
+                    schema=schema,
+                )
+                if k not in files:
+                    name = regions[k]
+                    system = {
+                        "name": name,
+                        "axes": [
+                            {"name": "x", "type": "space", "unit": "unit"},
+                            {"name": "y", "type": "space", "unit": "unit"},
+                        ],
+                    }
+                    points.create_group(
+                        name,
+                        attributes={
+                            "encoding-type": "ngff:points",
+                            "axes": ["x", "y"],
+                            "coordinateTransformations": [
+                                {"type": "identity", "input": {**system, "name": "xy"}, "output": system}
+                            ],
+                            "spatialdata_attrs": {"instance_key": "instance_id", "version": "0.2"},
+                        },
+                    )
+                    d = Path(points.store.root) / "points" / name / "points.parquet"
+                    d.mkdir(parents=True, exist_ok=True)
+                    files[k] = pq.ParquetWriter(d / "part.0.parquet", schema)
+                files[k].write_table(t)
+    finally:
+        for f in files.values():
+            f.close()
+    return [regions[k] for k in sorted(files)]
+
+
 def write_cell_store(
     cells,
     path,
@@ -278,12 +392,17 @@ def write_cell_store(
     image_info=None,
     info_key="images",
     chunk_rows=2**20,
+    points=True,
 ):
-    """Write cells as the cell table of a SpatialData Zarr store.
+    """Write cells as a SpatialData Zarr store.
 
     The store holds the cells as an AnnData table under ``tables/`` (Zarr v3), which :func:`spicy` reads a block of
     rows at a time and ``spatialdata.read_zarr()`` reads as a SpatialData object. The coordinates become the
     ``obsm`` array ``"spatial"`` and the other columns the table's ``obs`` (categorical columns stay categorical).
+    An AnnData object is written whole: ``X``, ``layers``, ``var``, ``obsm``, ``varm``, ``obsp``, ``varp`` and
+    ``uns`` as anndata writes them (chunked), and its ``obs`` as described here. The cells of each image also become
+    a points element named after the image (x, y and the ``"instance_id"`` that links each point to its row of the
+    table), so the table annotates elements of the store.
     The image column is the table's region key: a categorical column whose categories are the images in order of
     first appearance, unless it is categorical already. A column ``"instance_id"`` numbers the cells from 0
     (unsigned integers of 16 bits at least). A table with one row per image can be added as a second table. Every
@@ -311,6 +430,9 @@ def write_cell_store(
         The name of the per-image table.
     chunk_rows
         Rows per chunk of every array of the length of a table.
+    points
+        Whether to write the cells as points, one points element per image (needs pyarrow). Image IDs must then be
+        valid element names (letters, digits, ``_``, ``-`` and ``.``); otherwise no points are written, with a warning.
 
     Returns
     -------
@@ -326,9 +448,11 @@ def write_cell_store(
     >>> path = write_cell_store(cells, "cells.zarr")  # doctest: +SKIP
     """
     zarr = _zarr()
+    adata = None
     if type(cells).__name__ == "AnnData":
         from ._input import _anndata_coords
 
+        adata = cells
         obs = cells.obs
         x, y = _anndata_coords(cells, spatial_coords)
         index = cells.obs_names
@@ -379,6 +503,8 @@ def write_cell_store(
         out[:, 1] = y[a:b]
         return out
 
+    # an AnnData object's obsm "spatial", when the coordinates come from it, is written whole by anndata below
+    from_obs = adata is None or all(c in obs.columns for c in spatial_coords)
     w.anndata(
         tables,
         table_key,
@@ -387,11 +513,15 @@ def write_cell_store(
         n,
         _index_strings(index),
         instance=True,
-        spatial=spatial,
+        spatial=spatial if from_obs else None,
         spatial_dtype=xy_type,
         sd_attrs=sd_attrs,
         attrs={"spatialdata-encoding-type": "ngff:regions_table", "version": "0.2", **sd_attrs},
     )
+    if adata is not None:
+        _write_anndata_parts(tables[table_key], adata, w.ch, spatial_written=from_obs)
+    if points:
+        _write_points(root, obs[image_id], regions, x, y, n, w.ch)
     if image_info is not None:
         w.anndata(
             tables,
@@ -404,5 +534,7 @@ def write_cell_store(
         )
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="Consolidated metadata", category=UserWarning)
+        # the points' parquet files are part of a SpatialData store, not of its Zarr hierarchy
+        warnings.filterwarnings("ignore", message="Object at .*points.parquet is not recognized")
         zarr.consolidate_metadata(str(path))
     return path

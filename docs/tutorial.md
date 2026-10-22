@@ -489,9 +489,10 @@ image, so spicyr loads the image and cell-type columns once as integer codes and
 whole images at a time. Memory then depends on the size of an image and on the number of threads (`cores`), not on
 the size of the study, and the results are the same as for the same cells in memory.
 
-`write_cell_store()` writes cells as a SpatialData store: a DataFrame, or an AnnData object's `obs`, becomes the
-table's `obs`, with the image column as its region key, and the coordinates its `obsm` array `"spatial"`. We write
-the whole data set, so that the results can be compared with those above.
+`write_cell_store()` writes cells as a SpatialData store. An AnnData object is written whole: its `obs` as the
+table's `obs`, with the image column as its region key, and `X`, `layers`, `var`, `obsm` (with the coordinates in
+`"spatial"`) and `uns` as anndata writes them; the cells of each image also become a points element. We write the
+whole data set, so that the results can be compared with those above.
 
 ```{code-cell} ipython3
 import tempfile

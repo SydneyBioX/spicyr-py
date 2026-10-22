@@ -1,5 +1,18 @@
 # spicyr news
 
+## 1.99.29
+
+- `write_cell_store()` writes an AnnData object whole, as spicyR's `writeCellStore()` writes a SpatialExperiment:
+  `X`, `layers`, `var`, `obsm`, `varm`, `obsp`, `varp` and `uns` are written by anndata's own `write_elem()`,
+  chunked (a sparse matrix's arrays in chunks of `chunk_rows` values, a dense matrix in chunks of whole rows), with
+  the table's `obs`, region key and instance IDs as before. An `obsm["spatial"]` that holds the coordinates is
+  written as it is.
+- The cells of each image are also written as a points element named after the image (x, y and the instance ID
+  that links each point to its row of the table), so the table annotates elements of the store and spatialdata reads
+  it without warnings. Each chunk of rows is sorted by image and each image's rows appended to its own parquet
+  file, so every element is one file and memory stays that of a chunk. `points=False` skips them; image IDs that
+  are not valid element names give a warning and no points. Needs pyarrow (in the `store` extra).
+
 ## 1.99.28
 
 - `col_test()` takes `subject`: with a table of cells and `feature`, the proportions are then those of each
