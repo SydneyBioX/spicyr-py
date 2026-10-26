@@ -5,9 +5,62 @@ import pandas as pd
 
 from ._api import spicy
 
-__all__ = ["calibration_check"]
+__all__ = ["calibration_check", "SpicyCalibration"]
 
 _COLUMN = "shuffledCondition"
+
+
+class SpicyCalibration(pd.DataFrame):
+    """The result of :func:`calibration_check`: a DataFrame with one row per shuffle and threshold.
+
+    ``summary()`` gives the average percentage over the shuffles at each threshold, with the expected one, and
+    ``plot()`` shows each shuffle against the expected percentage.
+    """
+
+    @property
+    def _constructor(self):
+        return SpicyCalibration
+
+    def summary(self) -> pd.DataFrame:
+        """The average percentage of pairs below each threshold over the shuffles, with the expected percentage.
+
+        Returns
+        -------
+        A DataFrame with one row per threshold, the largest first: ``threshold``, ``expected`` (100 times the
+        threshold) and ``percent``, the mean over the shuffles.
+        """
+        out = pd.DataFrame(self).groupby("threshold")["percent"].mean().sort_index(ascending=False)
+        th = out.index.to_numpy(float)
+        return pd.DataFrame({"threshold": th, "expected": 100 * th, "percent": out.to_numpy(float)})
+
+    def plot(self, ax=None):
+        """Each shuffle's percentage of pairs below each threshold (points), with the expected percentage (red).
+
+        Returns
+        -------
+        The matplotlib axes.
+        """
+        import matplotlib.pyplot as plt
+
+        d = pd.DataFrame(self)
+        thresholds = sorted(d["threshold"].unique())
+        ax = ax or plt.figure(figsize=(5, 3.5), layout="constrained").gca()
+        rng = np.random.default_rng(1)
+        for k, th in enumerate(thresholds):
+            v = d.loc[d["threshold"] == th, "percent"].to_numpy(float)
+            ax.scatter(k + rng.uniform(-0.1, 0.1, len(v)), v, color="black", alpha=0.7, s=20, lw=0, zorder=2)
+            ax.hlines(100 * th, k - 0.25, k + 0.25, color="#b3261e", lw=2.5, zorder=1)  # expected
+        ax.set_xticks(range(len(thresholds)), [f"{th:g}" for th in thresholds])
+        ax.set_xlim(-0.6, len(thresholds) - 0.4)
+        ax.set_ylim(0, max(15.0, float(d["percent"].max())))
+        ax.yaxis.set_major_formatter(lambda v, _: f"{v:g}%")
+        ax.set(
+            xlabel="p-value threshold",
+            ylabel="pairs below the threshold",
+            title=f"{d['shuffle'].nunique()} shuffles of the condition (red: expected)",
+        )
+        ax.spines[["top", "right"]].set_visible(False)
+        return ax
 
 
 def calibration_check(
@@ -54,14 +107,18 @@ def calibration_check(
 
     Returns
     -------
-    A DataFrame with one row per shuffle and threshold: ``shuffle``, ``threshold`` and ``percent``, the percentage
-    of pairs whose p-value is below the threshold.
+    A :class:`SpicyCalibration`, a DataFrame with one row per shuffle and threshold: ``shuffle``, ``threshold`` and
+    ``percent``, the percentage of pairs whose p-value is below the threshold. Its ``summary()`` gives the average
+    percentage over the shuffles at each threshold, with the expected one, and ``plot()`` shows each shuffle against
+    the expected percentage.
 
     Examples
     --------
     >>> import spicyr
     >>> cells = spicyr.datasets.example_cells()
-    >>> spicyr.calibration_check(cells, condition="condition", subject="patient", r=30, n_shuffles=2, rng=1)  # doctest: +SKIP
+    >>> shuffles = spicyr.calibration_check(cells, condition="condition", subject="patient", r=30, n_shuffles=2, rng=1)
+    >>> shuffles.summary()  # doctest: +SKIP
+    >>> shuffles.plot()  # doctest: +SKIP
     """
     if (condition is None) == (survival is None):
         raise ValueError("give `condition` or `survival`, not both.")
@@ -103,4 +160,4 @@ def calibration_check(
             rows += [(i + 1, t, 100 * float((p < t).mean())) for t in thresholds]
     finally:
         obs.drop(columns=[n for n in new if n in obs.columns], inplace=True)
-    return pd.DataFrame(rows, columns=["shuffle", "threshold", "percent"])
+    return SpicyCalibration(rows, columns=["shuffle", "threshold", "percent"])

@@ -1,0 +1,7 @@
+"","from","to","side","excess_ref","excess_comp","excess_difference","p_value","p_adj"
+"tumour__T","tumour","T","attract",0.0888,0.322,0.233,0.0125,0.391
+"T__tumour","T","tumour","attract",0.0317,0.116,0.0846,0.0217,0.391
+"stroma__T","stroma","T","avoid",-0.084,-0.0108,0.0731,0.0412,0.479
+"T__rare","T","rare","avoid",0.0162,-0.155,-0.171,0.0532,0.479
+"tumour__B","tumour","B","avoid",-0.0216,-0.0469,-0.0254,0.16,0.823
+"stroma__stroma","stroma","stroma","attract",0.0613,-0.0361,-0.0974,0.183,0.823

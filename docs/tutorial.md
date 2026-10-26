@@ -61,8 +61,6 @@ pip install "spicyr[data,plot,anndata] @ git+https://github.com/SydneyBioX/spicy
 ```
 
 ```{code-cell} ipython3
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import spicyr
 
@@ -112,15 +110,13 @@ adata
 ```
 
 ```{code-cell} ipython3
-print(adata.obs.drop_duplicates("metabricId")["ER.Status"].value_counts())  # patients by ER status
 adata.obs["cellType"].value_counts()
 ```
 
+Two of the cores, one ER− and one ER+:
+
 ```{code-cell} ipython3
-fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-for ax, core in zip(axes, ["MB0869_1_366", "MB0501_1_222"], strict=True):  # an ER- and an ER+ core
-    spicyr.plot_image(adata, core, ax=ax)
-plt.tight_layout()
+spicyr.plot_image(adata, ["MB0869_1_366", "MB0501_1_222"]);
 ```
 
 ## Testing every pair of cell types
@@ -143,9 +139,9 @@ res
 All 484 ordered pairs of cell types are tested in a few seconds on one core. Run time and memory grow roughly in
 proportion to the number of cells and to the radius.
 
-`top_pairs()` lists the most significant pairs. `intercept` is the average effect in ER− patients, and
-`coefficient` is the difference in average effect between ER+ and ER− patients (ER+ minus ER−), as a fraction of
-the `to` cells. P-values are adjusted across all pairs by the Benjamini–Hochberg method.
+`top_pairs()` lists the most significant pairs. `excess_ref` and `excess_comp` are the average effect in ER− and in
+ER+ patients, as a fraction of the `to` cells, and `excess_difference` is their difference (ER+ minus ER−).
+P-values are adjusted across all pairs by the Benjamini–Hochberg method.
 
 ```{code-cell} ipython3
 res.top_pairs(8)
@@ -162,10 +158,12 @@ assert ((top["from"] == "HR+ CK7-") | (top["to"] == "HR+ CK7-")).sum() >= 5 and 
 Most of these eight pairs have `HR+ CK7-` tumour cells as the `from` or the `to` type, the most significant as the
 `from` type; we come back to them in [Tissue compartments](#tissue-compartments).
 
-The full results are in `res.cell_results`, a DataFrame with one row per pair:
+`res.top_pairs(n=None)` lists every pair, and `from_` and `to` choose pairs. With `full=True` it gives every column
+of the test:
 
 | Column | Meaning |
 |---|---|
+| `side` | the scale of the effect: `attract` (more `to` cells next to `from` cells than chance) or `avoid` |
 | `excess_ref`, `excess_comp` | average effect in the reference group (ER−) and the comparison group (ER+) |
 | `excess_difference`, `se`, `df` | their difference, its standard error and degrees of freedom |
 | `p_value`, `p_adj` | p-value, and Benjamini–Hochberg adjusted p-value across all pairs |
@@ -192,8 +190,7 @@ We focus on an immune pair, T cells → `HR- Ki67+`: are proliferating hormone-r
 near T cells? Its effect is the extra fraction of these tumour cells with a T cell within 25 µm.
 
 ```{code-cell} ipython3
-pair = "T cells__HR- Ki67+"
-res.cell_results.loc[[pair], ["excess_ref", "excess_comp", "excess_difference", "p_value", "p_adj"]]
+res.top_pairs(from_="T cells", to="HR- Ki67+")
 ```
 
 In ER− tumours these tumour cells have a T cell nearby barely more often than chance would give (0.02). In ER+
@@ -220,28 +217,31 @@ This is an association in one cohort; it does not show that T cells attract the 
 cells carry no information about the pair (`NaN`).
 
 ```{code-cell} ipython3
-res.bind(pair).head(6)
+res.bind(from_="T cells", to="HR- Ki67+").head(6)
 ```
 
 ## Looking at the images
 
-`plot_image()` shows one image: the density of all cells in blue, the `from` cells in gold and the `to` cells in
-dark red. With `r`, it draws the circle around each `to` cell inside which spicyr looks for `from` cells. We look
-at three images found with the interactive box plot.
+`plot_image()` shows images: the density of all cells in blue, the `from` cells in gold and the `to` cells in dark
+red. With `r`, it draws the circle around each `to` cell inside which spicyr looks for `from` cells. We look at
+three images found with the interactive box plot. `bind()` has their effects and weights, with the images as index.
 
 ```{code-cell} ipython3
-d = res.bind(pair).set_index("imageID")
-d["weight"] = res.image_weights[pair]
 examples = ["MB0150_1_155", "MB0132_1_533", "MB0244_1_519"]
-d.loc[examples, ["condition", pair, "weight"]]
+ex = res.bind(from_="T cells", to="HR- Ki67+").loc[examples]
+ex
 ```
 
 ```{code-cell} ipython3
-fig, axes = plt.subplots(1, 3, figsize=(16, 5))
-for ax, image in zip(axes, examples):
-    spicyr.plot_image(adata, image, "T cells", "HR- Ki67+", r=25, ax=ax)
-    ax.set_title(f"{image} ({d.loc[image, 'condition']}), effect {d.loc[image, pair]:.2f}")
-plt.tight_layout()
+:tags: [remove-cell]
+
+# the text below describes these images
+assert ex["effect"].iloc[0] > 0.5 and ex["effect"].iloc[1] < 0 and ex["effect"].iloc[2] == 1
+assert ex["weight"].iloc[2] < ex["weight"].iloc[:2].min() / 2
+```
+
+```{code-cell} ipython3
+spicyr.plot_image(adata, examples, "T cells", "HR- Ki67+", r=25);
 ```
 
 In the ER+ image on the left, the T cells run along the band of tumour cells at the bottom: an effect of 0.68, as
@@ -254,7 +254,6 @@ its two tumour cells both happen to sit in a cluster of T cells.
 Point size matters. The right-hand image sits at the top of the box plot, but its weight is close to zero: an
 effect estimated from two cells says little. Weights also level off. Once an image has a few dozen `to` cells,
 more cells add little, because the differences between patients outweigh the noise within an image.
-The weights are in `res.image_weights`.
 :::
 
 ## Tissue compartments
@@ -265,8 +264,7 @@ and the other tumour cells sit among them, so far more of those cells have an `H
 had been placed at random among all the other cells, stroma included.
 
 ```{code-cell} ipython3
-tab = res.cell_results[res.cell_results["from"] == "HR+ CK7-"]
-tab.sort_values("p_value")[["to", "excess_ref", "excess_comp", "p_adj"]].head(6)
+res.top_pairs(from_="HR+ CK7-", n=6)
 ```
 
 In ER+ tumours the effect for proliferating `HR+ CK7- Ki67+` cells is 0.60, against 0.07 in ER− tumours, while
@@ -288,7 +286,7 @@ effect is then the number of extra `from` cells within the radius of each `to` c
 
 ```{code-cell} ipython3
 res_count = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=25, effect="count")
-res_count.cell_results.loc[[pair], ["excess_ref", "excess_comp", "excess_difference", "p_value", "p_adj"]]
+res_count.top_pairs(from_="T cells", to="HR- Ki67+")
 ```
 
 In ER+ tumours each proliferating tumour cell has about 0.16 extra T cells within 25 µm, against 0.01 in ER−
@@ -332,9 +330,7 @@ Each covariate also has its own effect and p-value. A categorical covariate has 
 `Grade2` and `Grade3` compare grades 2 and 3 with grade 1.
 
 ```{code-cell} ipython3
-cols = ["excess_difference", "p_value", "Age.At.Diagnosis_effect", "Age.At.Diagnosis_p_value",
-        "Grade2_effect", "Grade2_p_value", "Grade3_effect", "Grade3_p_value"]
-res_cov.cell_results.loc[[pair], cols]
+res_cov.top_pairs(from_="T cells", to="HR- Ki67+")
 ```
 
 The difference between ER+ and ER− patients is much the same after adjusting for age and grade, and neither has a
@@ -342,7 +338,8 @@ clear effect of its own on this pair. Patients with a missing covariate are left
 
 :::{note}
 A pair that cannot be adjusted, for example because its cell types appear in images of only one grade, is reported
-unadjusted, and its `adjusted_for` column says why. The printed summary above counts these pairs.
+unadjusted, and its `adjusted_for` column (with `top_pairs(full=True)`) says why. The printed summary above counts
+these pairs.
 :::
 
 Restricting `from_` and `to` does not change the results for the pairs that are tested.
@@ -357,10 +354,11 @@ smooth range of radii, which stays close to the exact max-T when neighbouring ra
 
 ```{code-cell} ipython3
 res_r = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=[10, 25, 50, 75])
-res_r.cell_results.loc[[pair, "B cells__HR- Ki67+"], ["r", "excess_difference", "p_value"]]
+res_r.top_pairs(from_=["T cells", "B cells"], to="HR- Ki67+")
 ```
 
-`r` is the radius with the strongest evidence, and `p_value` the combined p-value over all radii.
+`r` is the radius with the strongest evidence, and `p_value` the combined p-value over all radii. `radius_plot()`
+shows the evidence at each radius.
 
 :::{tip}
 The effect depends on the radius: at a larger radius more cells have a `from` cell nearby by chance, and the effect
@@ -370,12 +368,7 @@ the chosen radius is a little optimistic, because that radius was picked for its
 :::
 
 ```{code-cell} ipython3
-rr = res_r.radius_results
-fig, ax = plt.subplots(figsize=(6, 4))
-for from_, g in rr[(rr["to"] == "HR- Ki67+") & rr["from"].isin(["T cells", "B cells"])].groupby("from"):
-    ax.plot(g["r"], -np.log10(g["p_value"]), marker="o", label=from_)
-ax.set(ylim=(0, None), xlabel="radius (µm)", ylabel="-log10 p at each radius, ER+ vs ER-")
-ax.legend(title="from (to: HR- Ki67+)", frameon=False);
+res_r.radius_plot(from_=["T cells", "B cells"], to="HR- Ki67+");
 ```
 
 ## Is co-localisation associated with survival?
@@ -389,8 +382,15 @@ res_s
 ```
 
 ```{code-cell} ipython3
-cols = ["from", "to", "p_value", "p_adj", "hazard_ratio_sd"]
-res_s.cell_results.sort_values("p_value")[cols].head(6)
+res_s.top_pairs(n=6)
+```
+
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+# the text below describes the two significant pairs
+top_s = res_s.top_pairs(cutoff=0.05)
+assert len(top_s) == 2 and (top_s["from"] == "HR+ CK7-").all() and (top_s["hazard_ratio_sd"] < 1).all()
 ```
 
 The p-value comes from a score test that relates each patient's effect to their outcome. `hazard_ratio_sd` is the
@@ -406,6 +406,12 @@ res_s_er = spicyr.spicy(adata, survival=("timeRFS", "eventRFS"), subject="metabr
 res_s_er
 ```
 
+```{code-cell} ipython3
+:tags: [remove-cell]
+
+assert len(res_s_er.top_pairs(cutoff=0.05)) == 0
+```
+
 No pair remains significant: these two pairs say little about relapse beyond the tumour's ER status.
 
 ## A check you can run
@@ -413,22 +419,15 @@ No pair remains significant: these two pairs say little about relapse beyond the
 A test should give few significant results when there is nothing to find. Shuffling the ER labels across patients
 removes any real difference, so about 5% of pairs should then have p < 0.05, and about 1% p < 0.01.
 `calibration_check()` shuffles the condition and runs `spicy()` with the same arguments, ten times by default; here
-five, to keep this page quick to build.
+five, to keep this page quick to build. `summary()` averages the shuffles and `plot()` shows each of them.
 
 ```{code-cell} ipython3
 shuffles = spicyr.calibration_check(adata, condition="ER.Status", subject="metabricId", r=25, n_shuffles=5, rng=2026)
-shuffles.groupby("threshold")["percent"].mean()
+shuffles.summary()
 ```
 
 ```{code-cell} ipython3
-fig, ax = plt.subplots(figsize=(5, 3.5))
-for k, (th, v) in enumerate(shuffles.groupby("threshold", sort=False)["percent"]):
-    ax.scatter(np.full(len(v), k), v, color="black", alpha=0.7)
-    ax.hlines(100 * th, k - 0.25, k + 0.25, color="#b3261e", lw=2)  # expected
-ax.set_xticks([0, 1], [f"p < {th:g}" for th in shuffles["threshold"].unique()])
-ax.set(xlim=(-0.6, 1.6), ylim=(0, 15), ylabel="pairs below the threshold",
-       title="5 shuffles of the ER labels (red: expected)")
-ax.yaxis.set_major_formatter(lambda v, _: f"{v:g}%")
+shuffles.plot();
 ```
 
 Pairs share cells, so the percentage moves by a few points from one shuffle to the next.

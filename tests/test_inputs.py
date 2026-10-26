@@ -60,7 +60,7 @@ def test_from_keyword_alias():
 def test_accessors():
     res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=30)
     tp = res.top_pairs(n=5)
-    assert len(tp) == 5 and {"from", "to", "coefficient", "p.value"} <= set(tp.columns)
+    assert len(tp) == 5 and {"from", "to", "excess_difference", "p_value", "p_adj"} <= set(tp.columns)
     assert res.bind().shape == (CELLS["imageID"].nunique(), 3 + len(res.cell_results))
     assert "tumour__T" in res.cell_results.index
     assert res.cell_results.loc["tumour__T", "excess_difference"] > 0  # T cells were moved next to tumour cells

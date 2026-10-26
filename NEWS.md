@@ -1,5 +1,28 @@
 # spicyr news
 
+## 1.99.31
+
+- `top_pairs()` lists the columns of the test: `from`, `to`, `side`, `excess_ref`, `excess_comp`,
+  `excess_difference`, `p_value` and `p_adj`, with `r` for several radii, `level` for more than two conditions,
+  `hazard_ratio_sd` for survival and each covariate's `<covariate>_effect` and `<covariate>_p_value`. `full=True`
+  gives every column of `cell_results`. `from_` and `to` choose pairs (an error names a cell type with no pair),
+  `n=None` lists every pair, and with `cutoff` and no `n` every pair below the cutoff is listed, not only the first
+  ten. The spicyR 1.x columns `intercept`, `coefficient`, `p.value` and `adj.pvalue` are gone. As spicyR 1.99.42.
+- `bind()` has the image IDs as index, and `bind(from_=, to=)` gives one pair's table: `imageID`, `condition`,
+  `subject`, `effect` and each image's `weight` in the test.
+- `plot_image()` takes several images and draws them as panels of one figure, in the order given, sharing the axes
+  and the density scale, and returns the figure.
+- `radius_plot()` shows -log10 p at each radius for chosen pairs of a result with several radii, as spicyR's
+  `radiusPlot()`.
+- `calibration_check()` returns a `SpicyCalibration`, still a DataFrame, with `summary()` (the mean percentage over
+  the shuffles at each threshold, with the expected one) and `plot()` (each shuffle against the expected
+  percentage).
+- The printed results give the patients in each group (`Units: 14 patients (A 7, B 7) with 28 images`) and point to
+  `top_pairs()`.
+- The tutorial uses these functions in place of hand-written code.
+- Shared cases (`tests/shared_cases/make_accessor_cases.R`) check `top_pairs()` and `bind()` against spicyR's
+  `topPairs()` and `bind()`.
+
 ## 1.99.30
 
 - `write_cell_store()` works with anndata 0.13, which lists `X` among the layers (as `layers[None]`); `X` was

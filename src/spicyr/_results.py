@@ -8,6 +8,49 @@ import numpy as np
 import pandas as pd
 
 from ._cell import p_adjust_bh
+from ._coltest import _signif
+
+# the main columns of top_pairs(), in the order of the table; each covariate's effect and p-value follow
+_MAIN_COLUMNS = [
+    "from",
+    "to",
+    "parent",
+    "level",
+    "r",
+    "side",
+    "excess_ref",
+    "excess_comp",
+    "excess_difference",
+    "hazard_ratio_sd",
+    "p_value",
+    "p_adj",
+]
+# top_pairs(n=): 10, or with a cutoff every pair below it
+_ALL_BELOW_CUTOFF = object()
+
+
+def _from_alias(from_, kwargs):
+    """``from`` as a keyword (``**{"from": ...}``) for ``from_``; any other keyword is an error."""
+    if "from" in kwargs:
+        from_ = kwargs.pop("from")
+    if kwargs:
+        raise TypeError(f"unexpected arguments: {list(kwargs)}")
+    return from_
+
+
+def _pick_pairs(tab, from_, to):
+    """The rows of the chosen ``from`` and ``to`` cell types; an error names a type with no pair."""
+    for side, want in (("from", from_), ("to", to)):
+        if want is None:
+            continue
+        want = [want] if isinstance(want, str) else list(want)
+        have = set(tab[side].astype(str))
+        miss = [w for w in want if w not in have]
+        if miss:
+            raise ValueError(f"no pair with {side} = {', '.join(repr(m) for m in miss)} in the results.")
+        tab = tab[tab[side].astype(str).isin(want)]
+    return tab
+
 
 # matplotlib's tab10, translucent, for the plotly boxes (the same colours as the static plot)
 _TAB10_RGBA = [
@@ -84,50 +127,130 @@ class SpicyResults:
     # --- accessors -----------------------------------------------------------------------------------
     def top_pairs(
         self,
-        n: int | None = 10,
+        n: int | None = _ALL_BELOW_CUTOFF,
         coef: str | None = None,
         adj: str = "fdr",
         cutoff: float | None = None,
         figures: int | None = None,
+        from_=None,
+        to=None,
+        full: bool = False,
+        **kwargs,
     ) -> pd.DataFrame:
-        """The most significant pairs, as spicyR's ``topPairs()``."""
-        pv, cf = self.p_value, self.coefficient
-        if coef is None:
-            coef = [c for c in pv.columns if c.startswith("condition")][0]
-        p = pv[coef].to_numpy(float)
+        """The most significant pairs, or the results of chosen pairs, as spicyR's ``topPairs()``.
+
+        One row per pair (and per level with more than two conditions), most significant first, with the pair
+        (``"from__to"``) as index. The columns are those of the test: ``from``, ``to``, ``side``, ``excess_ref`` and
+        ``excess_comp`` (the average effect in the reference and the comparison group), ``excess_difference``,
+        ``p_value`` and ``p_adj``; with several radii, ``r``, the radius with the strongest evidence; with
+        covariates, the effect and p-value of each (``<covariate>_effect``, ``<covariate>_p_value``); for survival,
+        ``hazard_ratio_sd``. ``full=True`` gives every column of :attr:`cell_results`.
+
+        Parameters
+        ----------
+        n
+            The number of pairs to list (10 by default). ``None`` lists every pair, as does leaving ``n`` out when
+            ``cutoff`` is given.
+        coef
+            With more than two conditions, the level to list (``"III"`` or ``"conditionIII"``).
+        adj
+            The p-value adjustment: ``"fdr"`` (or ``"BH"``), Benjamini-Hochberg across all pairs.
+        cutoff
+            List only the pairs whose adjusted p-value is at most ``cutoff``.
+        figures
+            Round to ``figures`` significant figures, as R's ``signif()``.
+        from_, to
+            Only the pairs with these ``from`` and ``to`` cell types (one or several; ``from`` also works as a
+            keyword).
+        full
+            Every column of the test, not only the main ones.
+        """
+        from_ = _from_alias(from_, kwargs)
+        if n is _ALL_BELOW_CUTOFF:
+            n = None if cutoff is not None else 10
         if adj not in ("fdr", "BH"):
             raise ValueError("only adj = 'fdr' (Benjamini-Hochberg) is available.")
-        res = pd.DataFrame(
-            {
-                "intercept": cf["(Intercept)"].to_numpy(),
-                "coefficient": cf[coef].to_numpy(),
-                "p.value": p,
-                "adj.pvalue": p_adjust_bh(p),
-            },
-            index=pv.index,
-        )
-        ft = res.index.to_series().str.split("__", n=1, expand=True)
-        res["from"], res["to"] = ft[0].to_numpy(), ft[1].to_numpy()
-        res = res.sort_values("p.value", kind="stable")
+        tab = self.cell_results
+        if coef is not None and "level" in tab.columns:
+            level = str(coef).removeprefix("condition")
+            if level not in set(tab["level"]):
+                raise ValueError(f"coef must be one of {list(dict.fromkeys(tab['level']))}")
+            tab = tab[tab["level"] == level]
+        if not full:
+            effects = [c for c in tab.columns if c.endswith("_effect")]
+            covariates = [c for e in effects for c in (e, e.removesuffix("_effect") + "_p_value")]
+            tab = tab[[c for c in [*_MAIN_COLUMNS, *covariates] if c in tab.columns]]
+        tab = _pick_pairs(tab, from_, to)
+        tab = tab.sort_values("p_value", kind="stable")
         if cutoff is not None:
-            res = res[res["adj.pvalue"] <= cutoff]
+            tab = tab[tab["p_adj"] <= cutoff]
         if n is not None:
-            res = res.head(n)
+            tab = tab.head(n)
+        tab = tab.copy()
         if figures is not None:
-            res = res.apply(lambda c: c.map(lambda v: float(f"{v:.{figures}g}")) if c.dtype.kind == "f" else c)
-        return res
+            for c in tab.columns:
+                if tab[c].dtype.kind == "f":
+                    tab[c] = _signif(tab[c].to_numpy(), figures)
+        return tab
 
-    def bind(self, pair: str | None = None) -> pd.DataFrame:
-        """Per-image excess of every pair (or one ``"from__to"`` pair) with the image's condition and subject."""
-        out = pd.DataFrame({"imageID": self.image_ids})
+    def bind(self, pair: str | None = None, from_=None, to=None, parent=None, **kwargs) -> pd.DataFrame:
+        """The per-image values of every pair, or of one pair, as spicyR's ``bind()``.
+
+        One row per image, with the image IDs as index: ``imageID``, ``condition``, ``subject`` (if given) and one
+        column per pair, named ``"from__to"`` (only ``pair`` if given). With ``from_`` and ``to``, a table of that
+        pair alone, with its effect in a column ``effect`` and each image's ``weight`` in the test, to look up the
+        images behind one pair. ``NaN`` where the pair could not be measured in an image.
+        """
+        from_ = _from_alias(from_, kwargs)
+        out = pd.DataFrame({"imageID": self.image_ids}, index=pd.Index(self.image_ids))
         if self.condition is not None:
             out["condition"] = self.condition
         if self.subject is not None:
             out["subject"] = self.subject
+        if from_ is not None or to is not None:
+            if not (isinstance(from_, str) and isinstance(to, str)):
+                raise ValueError("give one `from_` and one `to` cell type.")
+            key = "__".join([from_, to] + ([parent] if parent is not None else []))
+            if key not in self.pairwise_assoc:
+                raise KeyError(f"pair {from_} -> {to} not found in the results.")
+            out["effect"] = self.pairwise_assoc[key]
+            out["weight"] = self.image_weights.get(key, np.full(len(out), np.nan))
+            return out
         keys = [pair] if pair is not None else list(self.pairwise_assoc)
         for k in keys:
             out[k] = self.pairwise_assoc[k]
         return out
+
+    def radius_plot(self, from_=None, to=None, ax=None, **kwargs):
+        """The evidence for pairs at each radius, as spicyR's ``radiusPlot()``.
+
+        For a result with several radii, plots -log10 of the p-value of each chosen pair at every radius, one line
+        per pair, to show the scale at which the evidence is strongest. The combined p-value over the radii is in
+        :meth:`top_pairs`. ``from_`` and ``to`` choose the pairs (one or several cell types each; every pair
+        between them).
+
+        Returns
+        -------
+        The matplotlib axes.
+        """
+        import matplotlib.pyplot as plt
+
+        from_ = _from_alias(from_, kwargs)
+        tab = self.radius_results
+        if tab is None:
+            raise ValueError("radius_plot() needs a result of spicy() with several radii.")
+        tab = _pick_pairs(tab, from_, to)
+        pair = tab["from"].astype(str) + " → " + tab["to"].astype(str)
+        what = "association with survival" if self.survival else " vs ".join(reversed(self.levels))
+        ax = ax or plt.figure(figsize=(6, 4), layout="constrained").gca()
+        for label in dict.fromkeys(pair):
+            g = tab[(pair == label).to_numpy()].sort_values("r")
+            ax.plot(g["r"], -np.log10(g["p_value"].to_numpy(float)), marker="o", label=label)
+        ax.set_ylim(bottom=0)
+        ax.set(xlabel="radius", ylabel=f"-log10 p at each radius, {what}")
+        ax.legend(frameon=False, loc="upper left", bbox_to_anchor=(1, 1))
+        ax.spines[["top", "right"]].set_visible(False)
+        return ax
 
     def box_plot(self, from_: str, to: str, ax=None, interactive: bool = False):
         """Per-image excess of one pair by condition, with a point per image behind each box.
@@ -142,10 +265,9 @@ class SpicyResults:
         key = f"{from_}__{to}"
         if key not in self.pairwise_assoc:
             raise KeyError(f"pair {from_} -> {to} not found in the results.")
-        d = self.bind(key).rename(columns={key: "excess"})
+        d = self.bind(from_=from_, to=to).rename(columns={"effect": "excess"})
         if "subject" not in d.columns:
             d["subject"] = d["imageID"]
-        d["weight"] = self.image_weights.get(key, np.full(len(d), np.nan))
         d = d[np.isfinite(d["excess"].to_numpy(float))]
         d["relative"] = d["weight"] / d.groupby("condition")["weight"].transform("mean")
         groups = [g for g in (self.levels or []) if (d["condition"] == g).any()]
@@ -421,10 +543,16 @@ class SpicyResults:
             f"k = {self.k} nearest neighbours" if self.k is not None else "r = " + ", ".join(f"{v:g}" for v in self.r)
         )
         lines = [f"spicyr (cell-level test): {n} pairs, {what}, {scale}"]
+        unit = self.subject if self.subject is not None else self.image_ids
+        groups = ""
+        if self.condition is not None:
+            first = ~pd.Series(unit).duplicated().to_numpy()  # each patient's condition, from its first image
+            count = pd.Series(np.asarray(self.condition, dtype=object)[first]).value_counts()
+            groups = " (" + ", ".join(f"{l} {int(count.get(l, 0))}" for l in self.levels) + ")"
         if self.subject is None:
-            lines.append(f"Units: {len(self.image_ids)} images (no subject given: each image is a patient)")
+            lines.append(f"Units: {len(self.image_ids)} images{groups}; no subject given: each image is a patient")
         else:
-            lines.append(f"Units: {len(set(self.subject))} patients with {len(self.image_ids)} images")
+            lines.append(f"Units: {len(set(self.subject))} patients{groups} with {len(self.image_ids)} images")
         if "adjusted_for" in t.columns:
             adj = [a for a in t["adjusted_for"].unique() if not a.startswith("none")]
             parts = list(dict.fromkeys(p for a in adj for p in a.split("+")))
@@ -459,5 +587,5 @@ class SpicyResults:
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
         if "unadjusted_p_adj" in t.columns:
             sig += f" ({int((t['unadjusted_p_adj'] < 0.05).sum())} without adjustment)"
-        lines += [sig, "See top_pairs() and .cell_results."]
+        lines += [sig, "See top_pairs()."]
         return "\n".join(lines)
