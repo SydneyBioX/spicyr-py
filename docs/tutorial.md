@@ -388,17 +388,18 @@ res_s.top_pairs(n=6)
 ```{code-cell} ipython3
 :tags: [remove-cell]
 
-# the text below describes the two significant pairs
-top_s = res_s.top_pairs(cutoff=0.05)
-assert len(top_s) == 2 and (top_s["from"] == "HR+ CK7-").all() and (top_s["hazard_ratio_sd"] < 1).all()
+# the text below describes the two strongest pairs, both significant
+top_s = res_s.top_pairs(n=2)
+assert len(res_s.top_pairs(cutoff=0.05)) > 2
+assert (top_s["from"] == "HR+ CK7-").all() and (top_s["p_adj"] < 0.05).all() and (top_s["hazard_ratio_sd"] < 1).all()
 ```
 
 The p-value comes from a score test that relates each patient's effect to their outcome. `hazard_ratio_sd` is the
 hazard ratio for a one standard deviation higher effect, from a Cox model; below one, patients with a higher effect
 had a lower risk of relapse. It is missing when the effect barely varies between patients.
 
-Two pairs are significant after adjusting for multiple testing, both with `HR+ CK7-` tumour cells as the `from`
-type: patients in whom more of the other tumour cells sat next to `HR+ CK7-` cells relapsed later. These cells are
+Several pairs are significant after adjusting for multiple testing. The two strongest have `HR+ CK7-` tumour cells
+as the `from` type: patients in whom more of the other tumour cells sat next to `HR+ CK7-` cells relapsed later. These cells are
 typical of ER+ tumours, and ER status is itself related to relapse, so we add it to the covariates.
 
 ```{code-cell} ipython3
