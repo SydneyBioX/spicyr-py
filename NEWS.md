@@ -1,5 +1,10 @@
 # spicyr news
 
+## 1.99.32
+
+- `top_pairs()` shows `side` only with `full=True`: the sign of the effects gives the direction. The tutorial
+  describes only the columns `top_pairs()` shows by default. As spicyR 1.99.44.
+
 ## 1.99.31
 
 - `top_pairs()` lists the columns of the test: `from`, `to`, `side`, `excess_ref`, `excess_comp`,

@@ -17,7 +17,6 @@ _MAIN_COLUMNS = [
     "parent",
     "level",
     "r",
-    "side",
     "excess_ref",
     "excess_comp",
     "excess_difference",
