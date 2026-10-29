@@ -861,6 +861,8 @@ def cell_table(fits, ctx, adjusted) -> pd.DataFrame | None:
             "tau2": x["tau2"],
         }
         add_side(row, o)
+        if not o["ok"] and "side" in row:
+            row["side"] = None
         row["not_tested"] = o.get("not_tested") if o["ok"] else (o.get("reason") or "not_tested")
         if adjusted:
             row["adjusted_for"] = o["adjusted_for"]
@@ -905,6 +907,8 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
                 "tau2": d["tau2"],
             }
             add_side(row, o)
+            if not o["ok"] and "side" in row:
+                row["side"] = None
             row["not_tested"] = None if o["ok"] else (o.get("reason") or "not_tested")
             if adjusted:
                 row["adjusted_for"] = o["adjusted_for"]
