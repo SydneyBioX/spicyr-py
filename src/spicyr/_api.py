@@ -75,13 +75,22 @@ def spicy(
     ``"none (no_information)"``), and it is left out of the combination over radii. With more than two conditions, a
     pair where any condition has no informative patient is not tested.
 
-    The conditions share one dispersion. Each condition's CR2 variance is divided by its
-    model-based variance, the ratios are averaged over the conditions with their numbers of patients as weights, and
-    the model-based variance of the difference is multiplied by this average. The degrees of freedom are those of
-    CR2. A small condition's own spread does not set the standard error alone, which matters when the conditions are
-    of unequal size and the patients' effects are skewed. With adjustment, the ratios are those of the coefficient of
-    each condition in the adjusted design, and every coefficient's variance is scaled the same way.
-    ``variance="hartung_knapp"`` keeps its own variance.
+    The standard error of the difference is the sum of each condition's own CR2 variance, on Satterthwaite degrees
+    of freedom; with adjustment, the CR2 variance of the adjusted design. ``variance="hartung_knapp"`` keeps its own
+    variance.
+
+    For a self-pair (``from_`` = ``to``) every cell can carry the label, so random labelling moves both the cells
+    counted and their neighbours. Its variance is the exact random-labelling variance of the self-pair (for the radius
+    graph and for the k nearest neighbours), not the variance of a pair of two types.
+
+    With the allocation effect, an image whose room on the pair's side (the ``to`` cells without a ``from`` neighbour
+    expected by chance for an attracting pair, those with one for an avoiding pair) is below one cell is not used:
+    its effect could not show the pair's side, and could be large in the other direction. The side is chosen first,
+    from every image.
+
+    Every requested pair has a row in ``cell_results``: ``not_tested`` gives why a pair (or, in ``radius_results``, a
+    radius) was not tested (``"one_patient_per_group"``, ``"no_information"``, ``"few_effective_units"`` or
+    ``"no_variation"``; None when it was), and its p-value is then NaN and not counted in the BH adjustment.
 
     A patient's weight within its condition grows with the information of its images, so one or two patients can
     carry nearly all of a condition's weight. A radius where a condition's effective patients (Kish's
@@ -134,7 +143,7 @@ def spicy(
         reported as ``abundance_effect``. It does not separate more ``from`` cells from more densely packed ones,
         and it removes real effects when the share tracks the condition.
     variance
-        "cr2" (default: CR2 on Satterthwaite df, with the dispersion shared by the conditions, see above) or "hartung_knapp" (the model-based variance, scaled by the Pearson statistic when that
+        "cr2" (default: each condition's CR2 variance, on Satterthwaite df, see above) or "hartung_knapp" (the model-based variance, scaled by the Pearson statistic when that
         exceeds its df and never below CR2, on m - 2 df). The variance used is in ``.variance``
         of the result.
     survival
@@ -358,6 +367,7 @@ def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, co
     x = _core.pair_tests(
         [g.any if allocation else g.totals for g in graphs],
         [g.self_expected if allocation else g.sq for g in graphs],
+        [g.self_var for g in graphs],
         allocation,
         graphs[0].knn,
         ctx.counts,
@@ -395,20 +405,27 @@ def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, co
         return {"table": tabs[0], "fits": fits}
     long = pd.concat([t.assign(r=rr) for t, rr in zip(tabs, radii, strict=True) if t is not None])
     long = long[["r"] + [c for c in long.columns if c != "r"]]
-    # the rows of `long`: radius by radius, the pairs tested there; one row per pair (in order of first appearance),
-    # that of its chosen radius
-    pk = [np.flatnonzero(x["ok"][:, k] == 1) for k in range(K)]
-    at = np.full((K, len(pairs)), -1)
-    pos = 0
-    for k in range(K):
-        at[k, pk[k]] = np.arange(pos, pos + len(pk[k]))
-        pos += len(pk[k])
-    key = np.array(list(dict.fromkeys(np.concatenate(pk).tolist())), dtype=int)
-    tab = long.iloc[at[x["best"][key], key]].copy()
-    tab["p_value"] = x["comb_p"][key]
-    tab["p_value_best_radius"] = x["comb_p_best"][key]
+    # the rows of `long`: radius by radius, every pair; one row per pair, that of its chosen radius. A pair tested at
+    # no radius keeps a row of NaNs, with the reasons it was not tested at each radius.
+    P = len(pairs)
+    best = np.asarray(x["best"])
+    none = best < 0
+    tab = long.iloc[np.where(none, keep, best) * P + np.arange(P)].copy()
+    tab["p_value"] = x["comb_p"]
+    tab["p_value_best_radius"] = x["comb_p_best"]
     if adjusted:
-        tab["unadjusted_p_value"] = x["comb_u_p"][key]
+        tab["unadjusted_p_value"] = x["comb_u_p"]
+    if none.any():
+        num = [c for c in tab.columns if pd.api.types.is_numeric_dtype(tab[c])]
+        tab.loc[none, num] = np.nan
+        if allocation:
+            tab.loc[none, "side"] = None
+        reasons = []
+        for j in np.flatnonzero(none):
+            w = [x["not_tested"][j * K + k] for k in range(K)]
+            w = list(dict.fromkeys(v for v in w if v))
+            reasons.append("; ".join(w) if w else None)
+        tab.loc[none, "not_tested"] = reasons
     tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
     if adjusted:
         tab["unadjusted_p_adj"] = _cell.p_adjust_bh(tab["unadjusted_p_value"])
@@ -439,9 +456,11 @@ def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names, enames=None
     extra_names: the covariates' columns, None without covariates. enames: the effect columns (default: those of the
     pairs adjusted at this radius).
     """
-    s = np.flatnonzero(x["ok"][:, k] == 1)
+    # every requested pair, tested or not (not_tested: why not; None when it was)
+    s = np.arange(len(from_))
     if not len(s):
         return None
+    K = x["ok"].shape[1]
 
     def at(key):
         return x[key][s, k]
@@ -458,10 +477,10 @@ def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names, enames=None
         "tau2": at("tau2"),
     }
     if allocation:
-        tab["side"] = ["attract" if v > 0 else "avoid" for v in at("side")]
+        tab["side"] = [("attract" if v > 0 else "avoid") if o == 1 else None for v, o in zip(at("side"), at("ok"))]
     tab["tau2_image"] = at("tau2_image")
+    tab["not_tested"] = [x["not_tested"][i * K + k] or None for i in s]
     if adjusted:
-        K = x["ok"].shape[1]
         design, ab = at("design"), at("abundance") == 1
         added = _added(ab, extra_names)
         label = [

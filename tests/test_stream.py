@@ -48,14 +48,16 @@ def test_stream_equals_dataset(name, batch):
                 exp = d.multi_radius_totals(np.asarray(radii), allocation)
             else:
                 d.build_knn(k) if knn else d.build_radius_index(radii[0])
+                sv = d.self_variances(knn, allocation)
                 exp = [
-                    (d.pair_neighbour_any_totals(knn), d.self_any_expected(knn))
+                    (d.pair_neighbour_any_totals(knn), d.self_any_expected(knn), sv)
                     if allocation
-                    else (d.pair_neighbour_totals(knn), d.pair_neighbour_out_sq_totals(knn))
+                    else (d.pair_neighbour_totals(knn), d.pair_neighbour_out_sq_totals(knn), sv)
                 ]
-            for (a, b), (ea, eb) in zip(got, exp, strict=True):
+            for (a, b, c), (ea, eb, ec) in zip(got, exp, strict=True):
                 np.testing.assert_array_equal(a, ea)
                 np.testing.assert_array_equal(b, eb)
+                np.testing.assert_allclose(c, ec, rtol=1e-12, atol=0)
 
 
 def test_layout_matches_sorted_counts():

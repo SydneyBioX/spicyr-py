@@ -1,5 +1,5 @@
 """The condition test's two rules: at least min(3, m_g / 2) effective patients per condition (m_g its patients with
-rows at the radius), and one dispersion shared by the conditions.
+rows at the radius), and each condition's own CR2 variance.
 
 One patient per image; image 1 (condition A) has 30 times the cells of the others at the same density, so at r = 5,
 where the patients do not differ (tau2 = 0), it carries nearly all of A's weight and A has under 2 effective patients.
@@ -93,13 +93,13 @@ def test_python_equals_r(name):
 def test_rules():
     for allocation in (True, False):
         a = _core.test_rules(allocation)
-        assert a["pooled_dispersion"] and a["min_effective_units"] and a["min_n_eff"] == 3
+        assert not a["pooled_dispersion"] and a["min_effective_units"] and a["min_n_eff"] == 3
 
 
 @pytest.mark.parametrize("r", [5.0, 12.0])
 def test_effective_patients_by_hand(r):
     ctx, rows = rows_at(r)
-    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", True)
+    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", False)
     J, _, g = per_unit(rows)
     w = J / (1 + u["tau2"] * J)
     kish = [w[g == k].sum() ** 2 / (w[g == k] ** 2).sum() for k in (0, 1)]
@@ -154,7 +154,8 @@ def test_more_than_two_conditions():
             assert o["reason"] == "few_effective_units"
 
 
-def test_pooled_dispersion_by_hand():
+def test_cr2_by_hand():
+    """Each condition's own CR2 variance (no pooled dispersion), as spicyR 1.99.48."""
     ctx, rows = rows_at(12.0)
     m = len(ctx.unit_labels)
     u0 = _core.excess_test(rows, rows["unit"], rows["group"], m, True, "cr2", False)  # CR2: tau2 and df
@@ -172,8 +173,7 @@ def test_pooled_dispersion_by_hand():
         EV.append(1 / B)
         mg.append(i.sum())
     np.testing.assert_allclose(u0["se"] ** 2, sum(V), rtol=1e-10)
-    phi = sum(mk * v / e for mk, v, e in zip(mg, V, EV, strict=True)) / sum(mg)
-    se = np.sqrt(phi * sum(EV))
+    se = np.sqrt(sum(V))
     dif = beta[1] - beta[0]
     x = run(r=12.0).cell_results.iloc[0]
     np.testing.assert_allclose(
@@ -187,9 +187,8 @@ def test_pooled_dispersion_by_hand():
     np.testing.assert_allclose([hk["se"], hk["df"], hk["p_value"]], [uh["se"], uh["df"], uh["p"]], rtol=1e-12)
 
 
-def test_pooled_dispersion_adjusted_by_hand():
-    """The adjusted design (one image per patient): each condition's coefficient's CR2 / model variance ratio, pooled
-    by patients, scales the model variance of every contrast."""
+def test_cr2_adjusted_by_hand():
+    """The adjusted design (one image per patient): the CR2 variance of the contrast, with no pooled dispersion."""
     ctx, rows = rows_at(12.0)
     xa = run(r=12.0, covariates=["age"]).cell_results.iloc[0]
     x = run(r=12.0).cell_results.iloc[0]
@@ -208,9 +207,8 @@ def test_pooled_dispersion_adjusted_by_hand():
     def cr2(c):
         return ((X @ (B @ c)) * e / np.sqrt(1 - h)) ** 2
 
-    phi = sum((g == k).sum() * cr2(np.eye(3)[k]).sum() / B[k, k] for k in (0, 1)) / len(g)
     c = np.array([-1.0, 1.0, 0.0])
-    se = np.sqrt(phi * c @ B @ c)
+    se = np.sqrt(cr2(c).sum())
     est = c @ theta
     np.testing.assert_allclose([xa["excess_difference"], xa["se"]], [est, se], rtol=1e-8)
     np.testing.assert_allclose(xa["age_effect"], theta[2], rtol=1e-8)
@@ -227,7 +225,7 @@ def test_the_bound_is_min_3_half_the_patients():
 def test_a_condition_of_3_patients_is_tested():
     cells = CELLS[CELLS["imageID"].isin([f"img{i:02d}" for i in range(2, 8)])]
     ctx, rows = rows_at(12.0, cells=cells)
-    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", True)
+    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", False)
     np.testing.assert_array_equal(u["n_units"], [3, 3])
     assert ((u["n_eff"] >= 1.5) & (u["n_eff"] < 3)).all()
     x = run(cells, r=12.0).cell_results

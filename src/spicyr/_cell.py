@@ -291,8 +291,8 @@ def _batch_rows(ctx, images):
 def cell_stream(ctx: Context, radii=None, k=None, allocation=True, n_threads=1, batch_cells=None) -> list:
     """The neighbour totals of every radius (or of k), image by image from the cells' source.
 
-    One element per radius (one for kNN): (any, self_expected) or (totals, sq), exactly as the whole-data Dataset
-    gives them. Batches of whole images (about `batch_cells` cells per thread) are read one after another, the next
+    One element per radius (one for kNN): (any, self_expected, self_var) or (totals, sq, self_var), exactly as the
+    whole-data Dataset gives them (self_var: the exact self-pair variances, Dataset.self_variances). Batches of whole images (about `batch_cells` cells per thread) are read one after another, the next
     while the core sums the current one; in the core each image runs in a Dataset of its own, the images shared among
     `n_threads` threads, so the results do not depend on the threads.
     """
@@ -302,6 +302,7 @@ def cell_stream(ctx: Context, radii=None, k=None, allocation=True, n_threads=1, 
     K = 1 if knn else len(rad)
     out_a = [np.zeros(ctx.n_images * T * T) for _ in range(K)]
     out_b = [np.zeros(ctx.n_images * T * (1 if allocation else T)) for _ in range(K)]
+    out_c = [np.zeros(ctx.n_images * T) for _ in range(K)]
     n_threads = max(1, int(n_threads))
     batches = _batches(ctx, (batch_cells or BATCH_CELLS) * n_threads)
     src = ctx.source
@@ -332,10 +333,11 @@ def cell_stream(ctx: Context, radii=None, k=None, allocation=True, n_threads=1, 
                 allocation,
                 out_a,
                 out_b,
+                out_c,
                 n_threads,
             )
             del x, y, im, ty
-    return list(zip(out_a, out_b, strict=True))
+    return list(zip(out_a, out_b, out_c, strict=True))
 
 
 @dataclass
@@ -347,13 +349,14 @@ class Graph:
     sq: np.ndarray | None = None
     any: np.ndarray | None = None
     self_expected: np.ndarray | None = None
+    self_var: np.ndarray | None = None
     image_heterogeneity: bool = False
 
 
-def _graph(knn, effect, a, b):
+def _graph(knn, effect, a, b, c):
     if effect == "allocation":
-        return Graph(knn, effect, np.zeros(0), any=a, self_expected=b)
-    return Graph(knn, effect, np.zeros(0), totals=a, sq=b)
+        return Graph(knn, effect, np.zeros(0), any=a, self_expected=b, self_var=c)
+    return Graph(knn, effect, np.zeros(0), totals=a, sq=b, self_var=c)
 
 
 def cell_graphs_radii(ctx: Context, radii, effect: str = "allocation", n_threads=1) -> list:
@@ -362,8 +365,8 @@ def cell_graphs_radii(ctx: Context, radii, effect: str = "allocation", n_threads
     One Graph per radius, each identical to cell_graph(ctx, pairs, r=radius, label_clustering=False, effect=effect).
     """
     return [
-        _graph(False, effect, a, b)
-        for a, b in cell_stream(ctx, radii=radii, allocation=effect == "allocation", n_threads=n_threads)
+        _graph(False, effect, a, b, c)
+        for a, b, c in cell_stream(ctx, radii=radii, allocation=effect == "allocation", n_threads=n_threads)
     ]
 
 
@@ -379,8 +382,8 @@ def cell_graph(
     knn = k is not None
     allocation = effect == "allocation"
     if not label_clustering:
-        a, b = cell_stream(ctx, radii=None if knn else r, k=k, allocation=allocation, n_threads=n_threads)[0]
-        return _graph(knn, effect, a, b)
+        a, b, c = cell_stream(ctx, radii=None if knn else r, k=k, allocation=allocation, n_threads=n_threads)[0]
+        return _graph(knn, effect, a, b, c)
     if ctx.data is None:
         raise ValueError("the label-clustering factor needs cell_context(dataset=True).")
     T = len(ctx.type_labels)
@@ -392,10 +395,11 @@ def cell_graph(
     else:
         ctx.data.build_radius_index(float(r))
         h = 2 * float(r)
+    sv = ctx.data.self_variances(knn, allocation)
     if allocation:
-        g = _graph(knn, effect, ctx.data.pair_neighbour_any_totals(knn), ctx.data.self_any_expected(knn))
+        g = _graph(knn, effect, ctx.data.pair_neighbour_any_totals(knn), ctx.data.self_any_expected(knn), sv)
     else:
-        g = _graph(knn, effect, ctx.data.pair_neighbour_totals(knn), ctx.data.pair_neighbour_out_sq_totals(knn))
+        g = _graph(knn, effect, ctx.data.pair_neighbour_totals(knn), ctx.data.pair_neighbour_out_sq_totals(knn), sv)
     # psi of a `to` type is the median over every counted type (not only the requested pairs), so a pair's result
     # does not depend on which other pairs were asked for
     tos = list(dict.fromkeys(p[1] for p in pairs))
@@ -411,9 +415,9 @@ def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     # images with a missing condition give no row: they play no part in the side, tau2_image or the test
     ig = None if ctx.image_group is None else np.asarray(ctx.image_group, dtype=np.int32)
     if g.effect == "allocation":
-        rows = _core.allocation_image_rows(g.any, g.self_expected, ctx.counts, T, fc, tc, g.psi, ig)
+        rows = _core.allocation_image_rows(g.any, g.self_expected, ctx.counts, T, fc, tc, g.psi, g.self_var, ig)
     else:
-        rows = _core.excess_image_rows(g.totals, g.sq, ctx.counts, T, fc, tc, g.knn, g.psi, ig)
+        rows = _core.excess_image_rows(g.totals, g.sq, ctx.counts, T, fc, tc, g.knn, g.psi, g.self_var, ig)
     rows["unit"] = ctx.image_unit[rows["img"]].astype(np.int32)
     if ctx.image_group is not None:
         rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)
@@ -647,7 +651,7 @@ def _design_tests(rows, m, Z, C, tau2, hk, n_groups=0):
 def _rules(rows) -> dict:
     """The rules of the condition test for these rows' effect (the core's test_rules).
 
-    Allocation (rows with a side), or the count effect: the pooled dispersion, and the minimum effective number of
+    Allocation (rows with a side), or the count effect: the pooled dispersion (off), and the minimum effective number of
     patients per condition.
     """
     return _core.test_rules("side" in rows)
@@ -704,6 +708,7 @@ def cell_rows_test(ctx, rows, f, t, frailty, variance, adjust, Z_extra=None, ext
     if skip is not None:
         out["test"] = dict(r, p=np.nan)
         out["unadjusted"] = out["test"]
+    out["not_tested"] = skip if skip is not None else ("no_variation" if not r["se"] > 0 else None)
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
@@ -822,6 +827,7 @@ FIRST_COLUMNS = [
     "p_value_best_radius",
     "tau2",
     "tau2_image",
+    "not_tested",
     "adjusted_for",
 ]
 
@@ -838,9 +844,11 @@ def cell_table(fits, ctx, adjusted) -> pd.DataFrame | None:
         return cell_table_levels(fits, ctx, adjusted)
     ok = [o for o in fits if o["ok"]]
     enames = _effect_names(ok)
+    na = {k: np.nan for k in ("coef_ref", "coef_comp", "difference", "se", "df", "p", "tau2")}
     rows = []
-    for o in ok:
-        x = o["test"]
+    # every requested pair, tested or not (not_tested: why not; None when it was)
+    for o in fits:
+        x = o["test"] if o["ok"] else na
         row = {
             "from": o["from"],
             "to": o["to"],
@@ -853,10 +861,11 @@ def cell_table(fits, ctx, adjusted) -> pd.DataFrame | None:
             "tau2": x["tau2"],
         }
         add_side(row, o)
+        row["not_tested"] = o.get("not_tested") if o["ok"] else (o.get("reason") or "not_tested")
         if adjusted:
             row["adjusted_for"] = o["adjusted_for"]
             _add_effects(row, o, enames)
-            u = o["unadjusted"]
+            u = o["unadjusted"] if o["ok"] else {"difference": np.nan, "se": np.nan, "df": np.nan, "p": np.nan}
             row.update(
                 unadjusted_difference=u["difference"],
                 unadjusted_se=u["se"],
@@ -878,9 +887,12 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
     """More than two conditions: one row per pair and level (contrast with the reference level)."""
     ok = [o for o in fits if o["ok"]]
     enames = _effect_names(ok)
+    na = {"theta": [np.nan], "estimate": np.nan, "se": np.nan, "df": np.nan, "p": np.nan, "tau2": np.nan}
     rows = []
-    for o in ok:
-        for l, d in o["levels_test"].items():
+    # every requested pair and level, tested or not (not_tested: why not; None when it was)
+    for o in fits:
+        tests = o["levels_test"].items() if o["ok"] else [(l, na) for l in ctx.levels[1:]]
+        for l, d in tests:
             row = {
                 "from": o["from"],
                 "to": o["to"],
@@ -893,10 +905,11 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
                 "tau2": d["tau2"],
             }
             add_side(row, o)
+            row["not_tested"] = None if o["ok"] else (o.get("reason") or "not_tested")
             if adjusted:
                 row["adjusted_for"] = o["adjusted_for"]
                 _add_effects(row, o, enames)
-                u = o["unadjusted_levels"][l]
+                u = o["unadjusted_levels"][l] if o["ok"] else na
                 row.update(
                     unadjusted_difference=u["estimate"],
                     unadjusted_se=u["se"],

@@ -123,8 +123,8 @@ def test_levels_and_survival_not_tested(r):
     cells = nv_cells(24)
     img = sorted(cells["imageID"].unique())
     cells["c3"] = cells["imageID"].map({im: "ABC"[(j + 1) % 3] for j, im in enumerate(img)})
-    with pytest.raises(ValueError, match="no pair could be tested"):
-        spicyr.spicy(cells, condition="c3", r=r, from_="tumour", to="T", adjust_abundance=True)
+    x = spicyr.spicy(cells, condition="c3", r=r, from_="tumour", to="T", adjust_abundance=True).cell_results
+    assert x["p_value"].isna().all() and (x["not_tested"] == "no_variation").all()
     rng = np.random.default_rng(2)
     cells["time"] = cells["imageID"].map(dict(zip(img, rng.exponential(1, len(img)), strict=True)))
     cells["event"] = cells["imageID"].map(dict(zip(img, (rng.random(len(img)) < 0.7).astype(int), strict=True)))

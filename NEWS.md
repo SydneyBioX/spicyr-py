@@ -1,5 +1,21 @@
 # spicyr news
 
+## 1.99.33
+
+- Self-pairs (`from_` = `to`): each image's variance is the exact random-labelling variance of the self-pair, for the
+  radius graph and for k nearest neighbours (fraction: Var(O); count: Var(O - pL)). It was the variance of a pair of
+  two types, which for a self-pair is too small. As spicyR 1.99.48.
+- Allocation effect: an image whose room on the pair's side (n_to - E when attracting, E when avoiding) is below one
+  cell is not used; the side is chosen first, from every image.
+- The variance of the difference is each condition's own CR2 variance; the dispersion is no longer pooled over the
+  conditions.
+- Every requested pair has a row in `cell_results`; the new column `not_tested` gives why a pair (or a radius) was
+  not tested, and its p-value is NaN and not counted in the BH adjustment. With more than two conditions a pair that
+  could not be tested is listed instead of stopping the analysis.
+- Faster with many patients: each image's patient is looked up directly.
+- `tests/shared_cases/make_neff_cases.R` and `make_noinfo_cases.R` (the generators of `neff_expected.json` and
+  `noinfo_expected.json`) are now in the repository.
+
 ## 1.99.32
 
 - `top_pairs()` shows `side` only with `full=True`: the sign of the effects gives the direction. The tutorial

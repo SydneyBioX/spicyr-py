@@ -147,27 +147,30 @@ bool np_constant_within(const py::array& values, const py::array& image_codes, c
 }
 
 // The neighbour totals of the images in a batch of rows (input order; every image present whole), written into the
-// full per-image arrays out_a / out_b (one per radius, or one for kNN): any and self_expected (allocation), or totals
-// and sq (count), image-major. image_map / type_map (by code; type_map's last entry is the missing type) give the
+// full per-image arrays out_a / out_b / out_c (one per radius, or one for kNN): any and self_expected (allocation),
+// or totals and sq (count), and the self-pair variances (Dataset::self_variances), image-major. image_map / type_map (by code; type_map's last entry is the missing type) give the
 // image (in the analysis' order) and cell type. Each image runs on its own, on up to n_threads threads.
 void stream_batch(const py::array& x, const py::array& y, const py::array& image_codes, const py::array& type_codes,
                   const IntArray& image_map, const IntArray& type_map, int n_types, const DoubleArray& radii, int k,
-                  bool allocation, const py::list& out_a, const py::list& out_b, int n_threads) {
+                  bool allocation, const py::list& out_a, const py::list& out_b, const py::list& out_c,
+                  int n_threads) {
   const spicyglm::CellColumns rows{np_column(x, "x"), np_column(y, "y"), np_codes(image_codes, "image"),
                                    np_codes(type_codes, "cell type")};
   spicyglm::StreamOptions o;
   o.radii = vec<double>(radii); o.k = k; o.allocation = allocation; o.n_types = n_types;
-  if (out_a.size() != o.n_results() || out_b.size() != o.n_results())
+  if (out_a.size() != o.n_results() || out_b.size() != o.n_results() || out_c.size() != o.n_results())
     throw std::invalid_argument("one output array per radius");
   spicyglm::StreamOutput out;
   std::size_t n_images = 0;
   for (std::size_t j = 0; j < o.n_results(); ++j) {
     auto pa = out_a[j].cast<py::array_t<double, py::array::c_style>>();
     auto pb = out_b[j].cast<py::array_t<double, py::array::c_style>>();
+    auto pc = out_c[j].cast<py::array_t<double, py::array::c_style>>();
     n_images = static_cast<std::size_t>(pa.size()) / o.block_a();
-    if (static_cast<std::size_t>(pa.size()) != n_images * o.block_a() || static_cast<std::size_t>(pb.size()) != n_images * o.block_b())
+    if (static_cast<std::size_t>(pa.size()) != n_images * o.block_a() || static_cast<std::size_t>(pb.size()) != n_images * o.block_b() ||
+        static_cast<std::size_t>(pc.size()) != n_images * o.block_c())
       throw std::invalid_argument("output arrays of the wrong size");
-    out.a.push_back(pa.mutable_data()); out.b.push_back(pb.mutable_data());
+    out.a.push_back(pa.mutable_data()); out.b.push_back(pb.mutable_data()); out.c.push_back(pc.mutable_data());
   }
   const spicyglm::CodeMaps maps{image_map.data(), static_cast<std::size_t>(image_map.size()), type_map.data(),
                                 static_cast<std::size_t>(type_map.size()) - 1, static_cast<int>(n_images)};
@@ -181,24 +184,27 @@ void stream_batch(const py::array& x, const py::array& y, const py::array& image
 // image_group: 0 or 1, -1 when missing; z: images x n_z (centred, NaN where missing), or empty; keep_radius: 0-based.
 // Per pair and radius the results are (P, K) arrays (effects: (P, K, 1 + n_z), the abundance then the covariates);
 // best is 0-based, -1 for none.
-py::dict pair_tests_np(const py::list& a, const py::list& b, bool allocation, bool knn, const DoubleArray& counts,
+py::dict pair_tests_np(const py::list& a, const py::list& b, const py::list& self_var, bool allocation, bool knn,
+                       const DoubleArray& counts,
                        int n_types, const DoubleArray& psi, const IntArray& from, const IntArray& to,
                        const IntArray& image_unit, const IntArray& image_group, int n_units, bool image_heterogeneity,
                        bool frailty, const std::string& variance, bool adjust, const DoubleArray& z, int n_z,
                        int keep_radius, const std::string& combine, int n_threads) {
   const std::size_t K = a.size(), T = static_cast<std::size_t>(n_types);
-  if (K < 1 || b.size() != K) throw std::invalid_argument("pair_tests: one a and one b per radius");
+  if (K < 1 || b.size() != K || self_var.size() != K)
+    throw std::invalid_argument("pair_tests: one a, b and self_var per radius");
   if (n_types < 1 || counts.size() % n_types != 0) throw std::invalid_argument("pair_tests: counts must be images x types");
   const std::size_t n_images = static_cast<std::size_t>(counts.size()) / T;
   // the arrays (converted once, if they need it) live through the call
-  std::vector<DoubleArray> av, bv;
+  std::vector<DoubleArray> av, bv, cv;
   PairTestInput in;
   for (std::size_t k = 0; k < K; ++k) {
-    av.push_back(a[k].cast<DoubleArray>()); bv.push_back(b[k].cast<DoubleArray>());
+    av.push_back(a[k].cast<DoubleArray>()); bv.push_back(b[k].cast<DoubleArray>()); cv.push_back(self_var[k].cast<DoubleArray>());
     if (static_cast<std::size_t>(av.back().size()) != n_images * T * T ||
-        static_cast<std::size_t>(bv.back().size()) != n_images * T * (allocation ? 1 : T))
+        static_cast<std::size_t>(bv.back().size()) != n_images * T * (allocation ? 1 : T) ||
+        static_cast<std::size_t>(cv.back().size()) != n_images * T)
       throw std::invalid_argument("pair_tests: neighbour totals of the wrong size");
-    in.a.push_back(av.back().data()); in.b.push_back(bv.back().data());
+    in.a.push_back(av.back().data()); in.b.push_back(bv.back().data()); in.self_var.push_back(cv.back().data());
   }
   if (psi.size() > 0) {
     if (static_cast<std::size_t>(psi.size()) != T * n_images) throw std::invalid_argument("pair_tests: psi must be types x images");
@@ -248,6 +254,7 @@ py::dict pair_tests_np(const py::list& a, const py::list& b, bool allocation, bo
   out["u_difference"] = pk(r.u_difference); out["u_se"] = pk(r.u_se); out["u_df"] = pk(r.u_df); out["u_p"] = pk(r.u_p);
   out["design"] = pk(r.design); out["abundance"] = pk(r.abundance);
   out["design_reason"] = py::cast(r.design_reason);   // a list, pair-major (p * K + k)
+  out["not_tested"] = py::cast(r.not_tested);         // a list, pair-major (p * K + k); "" where tested
   out["effect"] = pke(r.effect); out["effect_p"] = pke(r.effect_p);
   py::list rows, weight;
   for (std::size_t p = 0; p < P; ++p) { rows.append(rows_to(r.rows[p])); weight.append(arr(r.image_weight[p])); }
@@ -273,6 +280,9 @@ PYBIND11_MODULE(_core, m) {
       .def("pair_neighbour_out_sq_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_out_sq_totals(knn)); })
       .def("pair_neighbour_any_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_any_totals(knn)); })
       .def("self_any_expected", [](const Dataset& d, bool knn) { return arr(d.self_any_expected(knn)); })
+      // the exact self-pair variances, image-major (images x types)
+      .def("self_variances", [](const Dataset& d, bool knn, bool allocation) { return arr(d.self_variances(knn, allocation)); },
+           py::arg("knn"), py::arg("allocation"))
       // soft membership: a, each cell's `from` weight; cell i's `to` labels (0-based) are lab[ptr[i]:ptr[i + 1]] with
       // weights w. Per image (image-major), 3 + 4 n_labels values: L, Q, M, then per label O, sum b, sum b^2, sum b
       .def("weighted_excess_sums", [](const Dataset& d, const DoubleArray& a, const IntArray& ptr, const IntArray& lab,
@@ -280,12 +290,14 @@ PYBIND11_MODULE(_core, m) {
         return arr(d.weighted_excess_sums(vec<double>(a), vec<int>(ptr), vec<int>(lab), vec<double>(w), n_labels,
                                           allocation));
       }, py::arg("a"), py::arg("ptr"), py::arg("lab"), py::arg("w"), py::arg("n_labels"), py::arg("allocation"))
-      // several radii from one neighbour search: per radius (any, self_expected) or (totals, sq), as the single-radius calls
+      // several radii from one neighbour search: per radius (any, self_expected, self_var) or (totals, sq, self_var), as
+      // the single-radius calls
       .def("multi_radius_totals", [](Dataset& d, const DoubleArray& radii, bool allocation) {
         Dataset::MultiRadiusTotals m = d.multi_radius_totals(vec<double>(radii), allocation);
         py::list out;
         for (std::size_t k = 0; k < radii.size(); ++k)
-          out.append(allocation ? py::make_tuple(arr(m.any[k]), arr(m.self_expected[k])) : py::make_tuple(arr(m.totals[k]), arr(m.sq[k])));
+          out.append(allocation ? py::make_tuple(arr(m.any[k]), arr(m.self_expected[k]), arr(m.self_var[k]))
+                                : py::make_tuple(arr(m.totals[k]), arr(m.sq[k]), arr(m.self_var[k])));
         return out;
       }, py::arg("radii"), py::arg("allocation"));
 
@@ -295,7 +307,7 @@ PYBIND11_MODULE(_core, m) {
   m.def("constant_within", &np_constant_within, py::arg("values"), py::arg("image_codes"), py::arg("first_row"));
   m.def("stream_batch", &stream_batch, py::arg("x"), py::arg("y"), py::arg("image_codes"), py::arg("type_codes"),
         py::arg("image_map"), py::arg("type_map"), py::arg("n_types"), py::arg("radii"), py::arg("k"),
-        py::arg("allocation"), py::arg("out_a"), py::arg("out_b"), py::arg("n_threads") = 1);
+        py::arg("allocation"), py::arg("out_a"), py::arg("out_b"), py::arg("out_c"), py::arg("n_threads") = 1);
 
   m.def("pt_two_sided", [](double t, double df) { return pt_two_sided(t, df); });
   m.def("norm_quantile", [](double p) { return norm_quantile(p); });
@@ -304,21 +316,21 @@ PYBIND11_MODULE(_core, m) {
   auto groups = [](const py::object& g) { return g.is_none() ? std::vector<int>() : vec<int>(g.cast<IntArray>()); };
   m.def("excess_image_rows", [groups](const DoubleArray& totals, const DoubleArray& sq, const DoubleArray& counts,
                                       int n_types, int from, int to, bool knn, const DoubleArray& psi,
-                                      const py::object& image_group) {
+                                      const DoubleArray& self_var, const py::object& image_group) {
     int n_images = static_cast<int>(counts.size() / n_types);
     return rows_to(excess_image_rows(vec<double>(totals), vec<double>(sq), image_major(counts), n_types, n_images, from, to,
-                                     knn, vec<double>(psi), groups(image_group)));
+                                     knn, vec<double>(psi), vec<double>(self_var), groups(image_group)));
   }, py::arg("totals"), py::arg("sq"), py::arg("counts"), py::arg("n_types"), py::arg("from_"), py::arg("to"),
-     py::arg("knn"), py::arg("psi"), py::arg("image_group") = py::none());
+     py::arg("knn"), py::arg("psi"), py::arg("self_var"), py::arg("image_group") = py::none());
 
   m.def("allocation_image_rows", [groups](const DoubleArray& any_totals, const DoubleArray& self_expected,
                                           const DoubleArray& counts, int n_types, int from, int to, const DoubleArray& psi,
-                                          const py::object& image_group) {
+                                          const DoubleArray& self_var, const py::object& image_group) {
     int n_images = static_cast<int>(counts.size() / n_types);
     return rows_to(allocation_image_rows(vec<double>(any_totals), vec<double>(self_expected), image_major(counts), n_types,
-                                         n_images, from, to, vec<double>(psi), groups(image_group)));
+                                         n_images, from, to, vec<double>(psi), vec<double>(self_var), groups(image_group)));
   }, py::arg("any_totals"), py::arg("self_expected"), py::arg("counts"), py::arg("n_types"), py::arg("from_"),
-     py::arg("to"), py::arg("psi"), py::arg("image_group") = py::none());
+     py::arg("to"), py::arg("psi"), py::arg("self_var"), py::arg("image_group") = py::none());
 
   // sums: Dataset.weighted_excess_sums (images x (3 + 4 n_labels), image-major); to: 0-based label
   m.def("weighted_image_rows", [groups](const DoubleArray& sums, int n_labels, int to, bool allocation,
@@ -412,7 +424,7 @@ PYBIND11_MODULE(_core, m) {
     return o;
   });
 
-  m.def("pair_tests", &pair_tests_np, py::arg("a"), py::arg("b"), py::arg("allocation"), py::arg("knn"),
+  m.def("pair_tests", &pair_tests_np, py::arg("a"), py::arg("b"), py::arg("self_var"), py::arg("allocation"), py::arg("knn"),
         py::arg("counts"), py::arg("n_types"), py::arg("psi"), py::arg("from_"), py::arg("to"), py::arg("image_unit"),
         py::arg("image_group"), py::arg("n_units"), py::arg("image_heterogeneity"), py::arg("frailty"),
         py::arg("variance"), py::arg("adjust"), py::arg("z"), py::arg("n_z"), py::arg("keep_radius"),

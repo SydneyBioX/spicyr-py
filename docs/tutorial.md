@@ -458,9 +458,9 @@ spread between each patient's images (DerSimonian and Laird), so one large image
 images. Each patient has its own true effect, which varies around its group's mean by an amount estimated
 from the data (a frailty, or random-effects, model). The difference between groups, adjusted for any covariates, is
 tested on Satterthwaite degrees of freedom with patients as the clusters, using the small-sample cluster-robust (CR2)
-variance. The groups share one dispersion: the model-based variance is scaled by the ratio
-of each group's CR2 variance to its model-based variance, averaged over the groups, so a small group's own spread does
-not set the standard error alone. A radius where a group's effective patients fall below the smaller of three and
+variance, each group contributing its own CR2 variance. For a self-pair (`from_` the same as `to`), whose cells and
+neighbours are both moved by random labelling, the variance is the exact random-labelling variance of the self-pair.
+With the allocation effect, an image whose room on the pair's side is below one cell is not used. A radius where a group's effective patients fall below the smaller of three and
 half its patients at that radius, because a few patients carry nearly all of its weight, is not tested. This is designed to keep false positives near the nominal
 rate even with modest numbers of patients. A paper describing the method is in preparation.
 

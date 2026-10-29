@@ -113,12 +113,14 @@ def test_count_is_tested(r):
     g = _cell.cell_graph(ctx, [("tumour", "T")], r=r, label_clustering=False, effect="count")
     g.image_heterogeneity = True
     rows = _cell.cell_rows(ctx, g, "tumour", "T")
-    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", True)
+    u = _core.excess_test(rows, rows["unit"], rows["group"], len(ctx.unit_labels), True, "cr2", False)
     x = run(r=r, effect="count").cell_results
     assert x["p_value"].iloc[0] == u["p"] and np.isfinite(u["p"])
 
 
 def test_more_than_two_conditions():
-    with pytest.raises(ValueError, match="no pair could be tested"):
-        run(CELLS3, r=4.0)
-    assert len(run(CELLS3, r=4.8).cell_results)
+    # every level of the pair is in the table, not tested, with the reason
+    x = run(CELLS3, r=4.0).cell_results
+    assert x["p_value"].isna().all() and (x["not_tested"] == "no_information").all()
+    assert len(x) == 2
+    assert run(CELLS3, r=4.8).cell_results["p_value"].notna().all()
