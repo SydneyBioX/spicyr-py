@@ -1,5 +1,11 @@
 # spicyr news
 
+## 1.99.34
+
+- `spicy()` (cell method) is faster with a radius: each image's neighbours are found in one search, from which the
+  totals and the self-pair variances are both computed, and the self-pair variance visits each pair of cells once.
+  Results are identical. As spicyR 1.99.49.
+
 ## 1.99.33
 
 - Self-pairs (`from_` = `to`): each image's variance is the exact random-labelling variance of the self-pair, for the
