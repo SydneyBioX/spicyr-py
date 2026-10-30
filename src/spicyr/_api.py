@@ -497,7 +497,9 @@ def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names, enames=None
         "tau2": at("tau2"),
     }
     if allocation:
-        tab["side"] = [("attract" if v > 0 else "avoid") if o == 1 else None for v, o in zip(at("side"), at("ok"))]
+        tab["side"] = [
+            ("attract" if v > 0 else "avoid") if o == 1 else None for v, o in zip(at("side"), at("ok"), strict=True)
+        ]
     tab["tau2_image"] = at("tau2_image")
     tab["not_tested"] = [x["not_tested"][i * K + k] or None for i in s]
     if adjusted:

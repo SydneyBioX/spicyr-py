@@ -856,7 +856,7 @@ def cell_table(fits, ctx, adjusted) -> pd.DataFrame | None:
         return cell_table_levels(fits, ctx, adjusted)
     ok = [o for o in fits if o["ok"]]
     enames = _effect_names(ok)
-    na = {k: np.nan for k in ("coef_ref", "coef_comp", "difference", "se", "df", "p", "tau2")}
+    na = dict.fromkeys(("coef_ref", "coef_comp", "difference", "se", "df", "p", "tau2"), np.nan)
     rows = []
     # every requested pair, tested or not (not_tested: why not; None when it was)
     for o in fits:

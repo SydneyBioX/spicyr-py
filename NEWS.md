@@ -1,5 +1,10 @@
 # spicyr news
 
+## 1.99.36
+
+- Builds on Windows again (the core no longer uses `M_PI`; as spicyR 1.99.52).
+- Lint fixes; `tests/test_weights.py` compares missing text values alike under every pandas version.
+
 ## 1.99.35
 
 - `spicy()` (cell method), allocation effect with a radius: a self-pair's variance counts the neighbours shared by

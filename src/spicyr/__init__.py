@@ -13,7 +13,7 @@ from ._plots import plot_image
 from ._results import SpicyResults
 from ._write import write_cell_store
 
-__version__ = "1.99.35"
+__version__ = "1.99.36"
 __all__ = [
     "spicy",
     "col_test",

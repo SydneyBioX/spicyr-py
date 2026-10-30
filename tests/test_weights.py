@@ -34,7 +34,11 @@ def compare(got, exp, tol=1e-12, rtol=0.0):
             ok = np.isfinite(a) & np.isfinite(b)
             worst = max(worst, float(np.max(np.abs(a[ok] - b[ok]), initial=0.0)))
         else:
-            assert (got[col].astype(str).to_numpy() == exp[col].astype(str).to_numpy()).all(), col
+            # a missing value (None, NaN, pandas' NA or an empty CSV field) compares as ""
+            def text(x):
+                return x.astype(object).where(x.notna(), "").astype(str).to_numpy()
+
+            assert (text(got[col]) == text(exp[col])).all(), col
     return worst
 
 
