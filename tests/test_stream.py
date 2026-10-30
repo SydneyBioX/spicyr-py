@@ -45,10 +45,10 @@ def test_stream_equals_dataset(name, batch):
             got = _cell.cell_stream(ctx, radii=radii, k=k, allocation=allocation, n_threads=3, batch_cells=batch)
             knn = k is not None
             if radii is not None and len(radii) > 1:
-                exp = d.multi_radius_totals(np.asarray(radii), allocation)
+                exp = d.multi_radius_totals(np.asarray(radii), allocation, *_cell._self_var_args(ctx))
             else:
                 d.build_knn(k) if knn else d.build_radius_index(radii[0])
-                sv = d.self_variances(knn, allocation)
+                sv = d.self_variances(knn, allocation, *_cell._self_var_args(ctx))
                 exp = [
                     (d.pair_neighbour_any_totals(knn), d.self_any_expected(knn), sv)
                     if allocation

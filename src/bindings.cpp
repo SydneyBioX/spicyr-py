@@ -153,11 +153,12 @@ bool np_constant_within(const py::array& values, const py::array& image_codes, c
 void stream_batch(const py::array& x, const py::array& y, const py::array& image_codes, const py::array& type_codes,
                   const IntArray& image_map, const IntArray& type_map, int n_types, const DoubleArray& radii, int k,
                   bool allocation, const py::list& out_a, const py::list& out_b, const py::list& out_c,
-                  int n_threads) {
+                  int n_threads, int self_var_method, int self_var_cells) {
   const spicyglm::CellColumns rows{np_column(x, "x"), np_column(y, "y"), np_codes(image_codes, "image"),
                                    np_codes(type_codes, "cell type")};
   spicyglm::StreamOptions o;
   o.radii = vec<double>(radii); o.k = k; o.allocation = allocation; o.n_types = n_types;
+  o.self_var_method = self_var_method; o.self_var_cells = self_var_cells;
   if (out_a.size() != o.n_results() || out_b.size() != o.n_results() || out_c.size() != o.n_results())
     throw std::invalid_argument("one output array per radius");
   spicyglm::StreamOutput out;
@@ -281,8 +282,9 @@ PYBIND11_MODULE(_core, m) {
       .def("pair_neighbour_any_totals", [](const Dataset& d, bool knn) { return arr(d.pair_neighbour_any_totals(knn)); })
       .def("self_any_expected", [](const Dataset& d, bool knn) { return arr(d.self_any_expected(knn)); })
       // the exact self-pair variances, image-major (images x types)
-      .def("self_variances", [](const Dataset& d, bool knn, bool allocation) { return arr(d.self_variances(knn, allocation)); },
-           py::arg("knn"), py::arg("allocation"))
+      .def("self_variances", [](const Dataset& d, bool knn, bool allocation, int self_var_method, int self_var_cells) {
+             return arr(d.self_variances(knn, allocation, self_var_method, self_var_cells)); },
+           py::arg("knn"), py::arg("allocation"), py::arg("self_var_method") = 0, py::arg("self_var_cells") = 50)
       // soft membership: a, each cell's `from` weight; cell i's `to` labels (0-based) are lab[ptr[i]:ptr[i + 1]] with
       // weights w. Per image (image-major), 3 + 4 n_labels values: L, Q, M, then per label O, sum b, sum b^2, sum b
       .def("weighted_excess_sums", [](const Dataset& d, const DoubleArray& a, const IntArray& ptr, const IntArray& lab,
@@ -292,14 +294,15 @@ PYBIND11_MODULE(_core, m) {
       }, py::arg("a"), py::arg("ptr"), py::arg("lab"), py::arg("w"), py::arg("n_labels"), py::arg("allocation"))
       // several radii from one neighbour search: per radius (any, self_expected, self_var) or (totals, sq, self_var), as
       // the single-radius calls
-      .def("multi_radius_totals", [](Dataset& d, const DoubleArray& radii, bool allocation) {
-        Dataset::MultiRadiusTotals m = d.multi_radius_totals(vec<double>(radii), allocation);
+      .def("multi_radius_totals", [](Dataset& d, const DoubleArray& radii, bool allocation, int self_var_method,
+                                     int self_var_cells) {
+        Dataset::MultiRadiusTotals m = d.multi_radius_totals(vec<double>(radii), allocation, self_var_method, self_var_cells);
         py::list out;
         for (std::size_t k = 0; k < radii.size(); ++k)
           out.append(allocation ? py::make_tuple(arr(m.any[k]), arr(m.self_expected[k]), arr(m.self_var[k]))
                                 : py::make_tuple(arr(m.totals[k]), arr(m.sq[k]), arr(m.self_var[k])));
         return out;
-      }, py::arg("radii"), py::arg("allocation"));
+      }, py::arg("radii"), py::arg("allocation"), py::arg("self_var_method") = 0, py::arg("self_var_cells") = 50);
 
   m.def("cell_layout", &cell_layout, py::arg("image_codes"), py::arg("n_image_codes"), py::arg("type_codes"),
         py::arg("n_type_codes"));
@@ -307,7 +310,8 @@ PYBIND11_MODULE(_core, m) {
   m.def("constant_within", &np_constant_within, py::arg("values"), py::arg("image_codes"), py::arg("first_row"));
   m.def("stream_batch", &stream_batch, py::arg("x"), py::arg("y"), py::arg("image_codes"), py::arg("type_codes"),
         py::arg("image_map"), py::arg("type_map"), py::arg("n_types"), py::arg("radii"), py::arg("k"),
-        py::arg("allocation"), py::arg("out_a"), py::arg("out_b"), py::arg("out_c"), py::arg("n_threads") = 1);
+        py::arg("allocation"), py::arg("out_a"), py::arg("out_b"), py::arg("out_c"), py::arg("n_threads") = 1,
+        py::arg("self_var_method") = 0, py::arg("self_var_cells") = 50);
 
   m.def("pt_two_sided", [](double t, double df) { return pt_two_sided(t, df); });
   m.def("norm_quantile", [](double p) { return norm_quantile(p); });

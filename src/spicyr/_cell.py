@@ -80,6 +80,9 @@ class Context:
     images: pd.DataFrame | None = None  # one row per image (index: image IDs) for columns not in the cell table
     ord: np.ndarray | None = None  # the Dataset's rows (ctx.data), as rows of the cells
     cells_per_image: np.ndarray | None = None  # soft membership: each image's number of cells (counts are weights)
+    # the allocation self-pair variance with a radius: "sampled" (the default), "exact", "geometricSampled" or
+    # "geometric", and the cells sampled per image (spicy()'s self_variance and self_variance_cells)
+    self_var: tuple = ("sampled", 50)
 
     def has(self, name) -> bool:
         return self.source.has(name) or (self.images is not None and name in self.images.columns)
@@ -288,6 +291,14 @@ def _batch_rows(ctx, images):
     return _core.rows_of_images(ctx.source.image_codes, keep)
 
 
+_SELF_VAR = ("exact", "geometric", "sampled", "geometricSampled")
+
+
+def _self_var_args(ctx: Context) -> tuple:
+    """The core's code for ctx.self_var's method, and its number of sampled cells."""
+    return _SELF_VAR.index(ctx.self_var[0]), int(ctx.self_var[1])
+
+
 def cell_stream(ctx: Context, radii=None, k=None, allocation=True, n_threads=1, batch_cells=None) -> list:
     """The neighbour totals of every radius (or of k), image by image from the cells' source.
 
@@ -335,6 +346,7 @@ def cell_stream(ctx: Context, radii=None, k=None, allocation=True, n_threads=1, 
                 out_b,
                 out_c,
                 n_threads,
+                *_self_var_args(ctx),
             )
             del x, y, im, ty
     return list(zip(out_a, out_b, out_c, strict=True))
@@ -395,7 +407,7 @@ def cell_graph(
     else:
         ctx.data.build_radius_index(float(r))
         h = 2 * float(r)
-    sv = ctx.data.self_variances(knn, allocation)
+    sv = ctx.data.self_variances(knn, allocation, *_self_var_args(ctx))
     if allocation:
         g = _graph(knn, effect, ctx.data.pair_neighbour_any_totals(knn), ctx.data.self_any_expected(knn), sv)
     else:

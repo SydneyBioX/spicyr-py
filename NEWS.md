@@ -1,5 +1,15 @@
 # spicyr news
 
+## 1.99.35
+
+- `spicy()` (cell method), allocation effect with a radius: a self-pair's variance counts the neighbours shared by
+  nearby cells from `self_variance_cells` (50) cells of each image, scaled up (`self_variance="sampled"`, the
+  default): an unbiased estimate. The sampled cells are those with the smallest hash of their coordinates, so the
+  results are reproducible, do not depend on the order of the rows, and match spicyR. `"exact"` (as 1.99.33-1.99.34),
+  `"geometricSampled"` and `"geometric"` are also available. Cross pairs, the count effect and k nearest neighbours
+  are unchanged. As spicyR 1.99.51.
+- `tests/shared_cases` regenerated with spicyR 1.99.51.
+
 ## 1.99.34
 
 - `spicy()` (cell method) is faster with a radius: each image's neighbours are found in one search, from which the

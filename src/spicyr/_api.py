@@ -39,6 +39,8 @@ def spicy(
     image_info=None,
     cell_weights=None,
     weight_labels=None,
+    self_variance="sampled",
+    self_variance_cells=50,
     **kwargs,
 ) -> SpicyResults:
     """Test whether the co-localisation of cell types differs between conditions, or is associated with survival.
@@ -80,8 +82,15 @@ def spicy(
     variance.
 
     For a self-pair (``from_`` = ``to``) every cell can carry the label, so random labelling moves both the cells
-    counted and their neighbours. Its variance is the exact random-labelling variance of the self-pair (for the radius
-    graph and for the k nearest neighbours), not the variance of a pair of two types.
+    counted and their neighbours. Its variance is the random-labelling variance of the self-pair (for the radius graph
+    and for the k nearest neighbours), not the variance of a pair of two types. For the allocation effect this variance
+    depends on how many neighbours each pair of nearby cells shares, which takes time in proportion to the number of
+    cells times the square of the number of neighbours per cell. With a radius, the shared neighbours are by default
+    counted from ``self_variance_cells`` randomly chosen cells of each image and scaled up
+    (``self_variance="sampled"``), an unbiased estimate of the variance; the sample is fixed by the image, so results
+    are reproducible and the same as spicyR's. ``"exact"`` counts them for every cell; ``"geometric"`` takes two cells
+    to share their local density times the area where their two discs overlap; ``"geometricSampled"`` corrects that
+    with the sampled cells. The count effect and the k nearest neighbours always use the exact variance.
 
     With the allocation effect, an image whose room on the pair's side (the ``to`` cells without a ``from`` neighbour
     expected by chance for an attracting pair, those with one for an avoiding pair) is below one cell is not used:
@@ -177,6 +186,12 @@ def spicy(
         not tested.
     weight_labels
         The labels of the columns of ``cell_weights`` when it is a 2-D numpy array or sparse matrix.
+    self_variance
+        Cell method, allocation effect with a radius: how a self-pair's variance counts the neighbours shared by
+        nearby cells: ``"sampled"`` (the default), ``"exact"``, ``"geometricSampled"`` or ``"geometric"`` (see above).
+    self_variance_cells
+        The number of cells sampled in each image for ``"sampled"`` or ``"geometricSampled"`` (every cell when an
+        image has no more).
     """
     if "from" in kwargs:
         from_ = kwargs.pop("from")
@@ -225,6 +240,11 @@ def spicy(
         image_id=image_id,
         dataset=weighted,
     )
+    if self_variance not in _cell._SELF_VAR:
+        raise ValueError(f"`self_variance` must be one of {', '.join(_cell._SELF_VAR)}.")
+    if not np.isscalar(self_variance_cells) or not np.isfinite(self_variance_cells) or self_variance_cells < 1:
+        raise ValueError("`self_variance_cells` must be a positive number of cells.")
+    ctx.self_var = (self_variance, int(self_variance_cells))
     types = ctx.type_labels
     if weighted:
         memb, types = _cell.membership(
