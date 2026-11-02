@@ -454,9 +454,9 @@ of each, and the denominator is $n$, an analogue of Ripley's K function.
 
 Images from the same patient are combined, giving more weight to more informative images (usually those with more
 `to` cells), up to a limit: a patient's images can differ in their true effect, by an amount estimated from the
-spread between each patient's images (DerSimonian and Laird), so one large image cannot outweigh the patient's other
+spread between each patient's images (Paule and Mandel), so one large image cannot outweigh the patient's other
 images. Each patient has its own true effect, which varies around its group's mean by an amount estimated
-from the data (a frailty, or random-effects, model). The difference between groups, adjusted for any covariates, is
+from the data in the same way (a frailty, or random-effects, model). The difference between groups, adjusted for any covariates, is
 tested on Satterthwaite degrees of freedom with patients as the clusters, using the small-sample cluster-robust (CR2)
 variance, each group contributing its own CR2 variance. For a self-pair (`from_` the same as `to`), whose cells and
 neighbours are both moved by random labelling, the variance is the exact random-labelling variance of the self-pair.

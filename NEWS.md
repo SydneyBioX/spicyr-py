@@ -1,5 +1,11 @@
 # spicyr news
 
+## 1.99.37
+
+- The variance between a patient's images (`tau2_image`) is estimated by Paule-Mandel, as the variance between
+  patients already was (it was DerSimonian-Laird, a one-step approximation). With one image per patient nothing
+  changes. Core as spicyR 1.99.53.
+
 ## 1.99.36
 
 - Builds on Windows again (the core no longer uses `M_PI`; as spicyR 1.99.52).
