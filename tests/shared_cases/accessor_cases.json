@@ -19,6 +19,12 @@
       "r": 30,
       "from": "tumour"
     },
+    "continuous": {
+      "condition": "age",
+      "subject": "patient",
+      "r": 30,
+      "from": ["tumour", "T"]
+    },
     "survival": {
       "condition": "os",
       "subject": "patient",
@@ -129,6 +135,21 @@
       "args": {
         "from": "tumour",
         "to": "macro"
+      }
+    },
+    "top_continuous": {
+      "fit": "continuous",
+      "call": "topPairs",
+      "args": {
+        "n": null
+      }
+    },
+    "bind_continuous": {
+      "fit": "continuous",
+      "call": "bind",
+      "args": {
+        "from": "tumour",
+        "to": "T"
       }
     }
   }

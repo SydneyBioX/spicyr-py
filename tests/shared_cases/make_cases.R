@@ -1,6 +1,6 @@
 ## Shared test cases for the twins: spicyR (R) computes the expected results; the Python tests
 ## (tests/test_shared_cases.py) must reproduce them. Rerun after any change to the core or to either front end:
-##   Rscript tests/shared_cases/make_cases.R      (needs spicyR >= 1.99.6)
+##   Rscript tests/shared_cases/make_cases.R      (needs spicyR >= 1.99.55)
 suppressPackageStartupMessages(library(spicyR))
 out_dir <- file.path("tests", "shared_cases")
 set.seed(20261002)
@@ -40,7 +40,12 @@ cases <- list(
   radii_davies = list(condition = "condition", subject = "patient", r = seq(5, 40, by = 5), from = "tumour", to = c("T", "B"), combine = "davies"),
   survival = list(condition = "os", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B", "macro"), covariates = "age"),
   covariates_missing = list(condition = "condition", subject = "patient", r = 30, covariates = c("age_na", "batch"), from = c("tumour", "T")),
-  survival_missing = list(condition = "os", subject = "patient", r = 30, from = "T", to = c("tumour", "B"), covariates = "age_na")
+  survival_missing = list(condition = "os", subject = "patient", r = 30, from = "T", to = c("tumour", "B"), covariates = "age_na"),
+  three_levels_hk = list(condition = "stage", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B"), variance = "hartung_knapp"),
+  continuous = list(condition = "age", subject = "patient", r = 30),
+  continuous_adjusted = list(condition = "age", subject = "patient", r = 30, from = c("tumour", "T"), adjustAbundance = TRUE, covariates = "batch"),
+  continuous_hk = list(condition = "age", subject = "patient", r = 30, from = "tumour", variance = "hartung_knapp"),
+  continuous_missing = list(condition = "age_na", subject = "patient", r = 30, from = c("tumour", "T"), to = c("T", "B"))
 )
 manifest <- list()
 for (nm in names(cases)) {

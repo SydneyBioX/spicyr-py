@@ -47,6 +47,15 @@ def condition_levels(col: pd.Series) -> list[str]:
     return sorted(set(as_str(col).dropna()))
 
 
+def _is_number(col: pd.Series) -> bool:
+    """A numeric column (not boolean or categorical): continuous when it has more than two values."""
+    return (
+        pd.api.types.is_numeric_dtype(col)
+        and not pd.api.types.is_bool_dtype(col)
+        and not isinstance(col.dtype, pd.CategoricalDtype)
+    )
+
+
 def enumerate_pairs(from_, to, all_types):
     """Every ordered (from, to) pair, from-major, as spicyR's enumerate_pairs(family = "binomial")."""
     if isinstance(from_, str) and isinstance(to, str):
@@ -77,6 +86,9 @@ class Context:
     data: _core.Dataset | None = None
     levels: list | None = None
     image_group: np.ndarray | None = None
+    # a continuous condition (a number with more than two values): its value per image (NaN where missing)
+    continuous: bool = False
+    x: np.ndarray | None = None
     images: pd.DataFrame | None = None  # one row per image (index: image IDs) for columns not in the cell table
     ord: np.ndarray | None = None  # the Dataset's rows (ctx.data), as rows of the cells
     cells_per_image: np.ndarray | None = None  # soft membership: each image's number of cells (counts are weights)
@@ -216,12 +228,30 @@ def cell_context(
     if condition is not None and not survival:
         cv, cv_all, img_of_row = _values(ctx, condition, first_row_code)
         levels = condition_levels(cv_all)
-        if len(levels) < 2:
+        if _is_number(cv_all) and len(levels) > 2:
+            # a number with more than two values is continuous: every image with a value is in group 0
+            if ref is not None:
+                raise ValueError(
+                    f"`ref` is for a condition with groups; '{condition}' is continuous (a number with more than two "
+                    "values). Make it categorical to compare its values as groups."
+                )
+            if img_of_row is not None:
+                per_image = pd.Series(np.asarray(cv_all, dtype=float)).groupby(img_of_row).nunique()
+                if (per_image > 1).any():
+                    raise ValueError(f"'{condition}' must be constant within each image.")
+            ctx.continuous = True
+            ctx.x = np.asarray(pd.to_numeric(cv), dtype=float)
+            ctx.image_group = np.where(np.isnan(ctx.x), -1, 0)
+            if (pd.Series(ctx.x).groupby(ctx.image_unit).nunique() > 1).any():
+                raise ValueError(f"each subject must have a single value of '{condition}'.")
+            levels = None
+        elif len(levels) < 2:
             raise ValueError(f"`condition` needs at least two levels; found {len(levels)}.")
         if ref is not None:
             if str(ref) not in levels:
                 raise ValueError("`ref` is not a level of `condition`.")
             levels = [str(ref)] + [l for l in levels if l != str(ref)]
+    if condition is not None and not survival and not ctx.continuous:
         if img_of_row is not None:
             per_image = pd.Series(as_str(cv_all).to_numpy()).groupby(img_of_row).nunique()
             if (per_image > 1).any():
@@ -626,10 +656,21 @@ def _design(ctx, rows, f, adjust, Z_extra, extra_names):
     X = np.column_stack(cols)[keep]
     X = X - X.mean(axis=0)
     rw = _subset_rows(rows, keep)
-    G = len(ctx.levels)
-    Zg = (rw["group"][:, None] == np.arange(G)[None, :]).astype(float)
+    Zg = _condition_block(ctx, rw)
     parts = (["abundance"] if "abundance" in names[:1] else []) + (["covariates"] if Z_extra is not None else [])
     return {"rows": rw, "Z": np.column_stack([Zg, X]), "extra": names, "adjusted_for": "+".join(parts)}
+
+
+def _condition_block(ctx, rows):
+    """The condition's columns of a design.
+
+    One indicator per level, or for a continuous condition the intercept and the condition centred over these rows
+    (the intercept is then the excess at the condition's mean).
+    """
+    if ctx.continuous:
+        x = ctx.x[rows["img"]]
+        return np.column_stack([np.ones(len(x)), x - x.mean()])
+    return (rows["group"][:, None] == np.arange(len(ctx.levels))[None, :]).astype(float)
 
 
 def _design_tau2(d, G, frailty, tau2):
@@ -658,6 +699,11 @@ def _contrasts(G, q):
 
 def _design_tests(rows, m, Z, C, tau2, hk, n_groups=0):
     return _core.design_tests(rows, rows["unit"], m, Z, C, C.shape[0], tau2, hk, n_groups)
+
+
+def _joint_test(rows, Z, C, tau2, hk):
+    """The joint test of the rows of C (CR2 Wald, HTZ F; Hartung-Knapp floored at CR2)."""
+    return _core.design_joint_test(rows, rows["unit"], Z, C, C.shape[0], tau2, hk)
 
 
 def _rules(rows) -> dict:
@@ -692,6 +738,8 @@ def cell_pair_test(ctx, g, f, t, frailty, variance, adjust, Z_extra=None, extra_
 
 def cell_rows_test(ctx, rows, f, t, frailty, variance, adjust, Z_extra=None, extra_names=()) -> dict:
     """The test of one pair on given image rows."""
+    if ctx.continuous:
+        return cell_pair_test_continuous(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names)
     if len(ctx.levels) > 2:
         return cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names)
     m = len(ctx.unit_labels)
@@ -794,6 +842,8 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
             return out
     un = dict(zip(ctx.levels[1:], u, strict=True))
     out.update(ok=True, levels_test=un, unadjusted_levels=un, test={"coef_ref": u[0]["theta"][0], "tau2": u[0]["tau2"]})
+    # the overall test: every level equal to the reference, jointly (HTZ)
+    out["overall"] = out["unadjusted_overall"] = _joint_test(rg, Zg, _contrasts(G, G), u[0]["tau2"], hk)
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
@@ -803,9 +853,62 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
     if not a[0]["ok"]:
         out["adjusted_for"] = f"none ({a[0]['reason']})"
         return out
+    out["overall"] = _joint_test(d["rows"], d["Z"], _contrasts(G, d["Z"].shape[1])[: G - 1], a[0]["tau2"], hk)
     out["levels_test"] = dict(zip(ctx.levels[1:], a[: G - 1], strict=True))
     out["effects"] = dict(zip(d["extra"], a[G - 1 :], strict=True))
     out["test"] = {"coef_ref": a[0]["theta"][0], "tau2": a[0]["tau2"]}
+    out["adjusted_for"] = d["adjusted_for"]
+    return out
+
+
+def cell_pair_test_continuous(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names) -> dict:
+    """A continuous condition: the slope of the excess on the condition.
+
+    In the design of the intercept and the centred condition (CR2, Satterthwaite df, tau2 by Paule-Mandel under that
+    design), with the same adjustments and rules as for groups (the rules with every patient in one group).
+    """
+    m = len(ctx.unit_labels)
+    hk = variance == "hartung_knapp"
+    rules = _rules(rows)
+    out = {"from": f, "to": t, "ok": False, "rows": rows, "adjusted_for": "none"}
+    rg = _subset_rows(rows, rows["group"] >= 0)  # images with a missing condition are left out
+    if not len(rg["img"]):
+        out["reason"] = "too_few_units"
+        return out
+    u = _design_tests(rg, m, _condition_block(ctx, rg), np.array([[0.0, 1.0]]), -1.0 if frailty else 0.0, hk)[0]
+    if not u["ok"]:
+        out["reason"] = u["reason"]
+        return out
+    if _no_information(rows, 1):
+        out["reason"] = "no_information"
+        return out
+    if rules["min_effective_units"]:
+        n_eff = np.asarray(_core.effective_units(rg, rg["unit"], rg["group"], 1, u["tau2"]))
+        if _few_effective(n_eff, [len(set(rg["unit"]))], rules):
+            out["reason"] = "few_effective_units"
+            return out
+
+    def slope(x):
+        return {
+            "intercept": x["theta"][0],
+            "slope": x["estimate"],
+            "se": x["se"],
+            "df": x["df"],
+            "p": x["p"],
+            "tau2": x["tau2"],
+        }
+
+    out.update(ok=True, test=slope(u), unadjusted=slope(u))
+    d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
+    if d is None:
+        return out
+    q = d["Z"].shape[1]
+    a = _design_tests(d["rows"], m, d["Z"], np.eye(q)[1:], _design_tau2(d, 2, frailty, u["tau2"]), hk)
+    if not a[0]["ok"]:
+        out["adjusted_for"] = f"none ({a[0]['reason']})"
+        return out
+    out["test"] = slope(a[0])
+    out["effects"] = dict(zip(d["extra"], a[1:], strict=True))
     out["adjusted_for"] = d["adjusted_for"]
     return out
 
@@ -832,10 +935,17 @@ FIRST_COLUMNS = [
     "excess_ref",
     "excess_comp",
     "excess_difference",
+    "excess_mean",
+    "excess_slope",
     "se",
     "df",
     "p_value",
     "p_adj",
+    "overall_F",
+    "overall_df1",
+    "overall_df2",
+    "overall_p_value",
+    "overall_p_adj",
     "p_value_best_radius",
     "tau2",
     "tau2_image",
@@ -852,6 +962,8 @@ def order_columns(tab):
 
 
 def cell_table(fits, ctx, adjusted) -> pd.DataFrame | None:
+    if ctx.continuous:
+        return cell_table_continuous(fits, ctx, adjusted)
     if len(ctx.levels) > 2:
         return cell_table_levels(fits, ctx, adjusted)
     ok = [o for o in fits if o["ok"]]
@@ -922,6 +1034,8 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
             if not o["ok"] and "side" in row:
                 row["side"] = None
             row["not_tested"] = None if o["ok"] else (o.get("reason") or "not_tested")
+            ov = _overall(o.get("overall"))
+            row.update(overall_F=ov["statistic"], overall_df1=ov["df1"], overall_df2=ov["df2"], overall_p_value=ov["p"])
             if adjusted:
                 row["adjusted_for"] = o["adjusted_for"]
                 _add_effects(row, o, enames)
@@ -932,6 +1046,7 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
                     unadjusted_df=u["df"],
                     unadjusted_p_value=u["p"],
                 )
+                row["unadjusted_overall_p_value"] = _overall(o.get("unadjusted_overall"))["p"]
             rows.append(row)
     if not rows:
         return None
@@ -944,7 +1059,64 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
         tab.loc[k, "p_adj"] = p_adjust_bh(tab.loc[k, "p_value"])
         if adjusted:
             tab.loc[k, "unadjusted_p_adj"] = p_adjust_bh(tab.loc[k, "unadjusted_p_value"])
+    # the overall test, once per pair (BH over the pairs)
+    key = tab["from"] + "__" + tab["to"]
+    first = (tab["level"] == tab["level"].iloc[0]).to_numpy()
+
+    def adj_overall(p):
+        return pd.Series(p_adjust_bh(p[first]), index=key[first]).reindex(key).to_numpy()
+
+    tab["overall_p_adj"] = adj_overall(tab["overall_p_value"])
+    if adjusted:
+        tab["unadjusted_overall_p_adj"] = adj_overall(tab["unadjusted_overall_p_value"])
     tab.index = tab["from"] + "__" + tab["to"] + "__" + tab["level"]
+    return order_columns(tab)
+
+
+def _overall(x) -> dict:
+    """The overall test of a fit (NaN when it was not tested)."""
+    if x is not None and x["ok"]:
+        return x
+    return dict.fromkeys(("statistic", "df1", "df2", "p"), np.nan)
+
+
+def cell_table_continuous(fits, ctx, adjusted) -> pd.DataFrame | None:
+    """A continuous condition: one row per pair, the excess at the condition's mean and its slope on the condition."""
+    ok = [o for o in fits if o["ok"]]
+    enames = _effect_names(ok)
+    na = dict.fromkeys(("intercept", "slope", "se", "df", "p", "tau2"), np.nan)
+    rows = []
+    for o in fits:
+        x = o["test"] if o["ok"] else na
+        row = {
+            "from": o["from"],
+            "to": o["to"],
+            "excess_mean": x["intercept"],
+            "excess_slope": x["slope"],
+            "se": x["se"],
+            "df": x["df"],
+            "p_value": x["p"],
+            "tau2": x["tau2"],
+        }
+        add_side(row, o)
+        if not o["ok"] and "side" in row:
+            row["side"] = None
+        row["not_tested"] = None if o["ok"] else (o.get("reason") or "not_tested")
+        if adjusted:
+            row["adjusted_for"] = o["adjusted_for"]
+            _add_effects(row, o, enames)
+            u = o["unadjusted"] if o["ok"] else na
+            row.update(
+                unadjusted_slope=u["slope"], unadjusted_se=u["se"], unadjusted_df=u["df"], unadjusted_p_value=u["p"]
+            )
+        rows.append(row)
+    if not rows:
+        return None
+    tab = pd.DataFrame(rows)
+    tab["p_adj"] = p_adjust_bh(tab["p_value"])
+    if adjusted:
+        tab["unadjusted_p_adj"] = p_adjust_bh(tab["unadjusted_p_value"])
+    tab.index = tab["from"] + "__" + tab["to"]
     return order_columns(tab)
 
 

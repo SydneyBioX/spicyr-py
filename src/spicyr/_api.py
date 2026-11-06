@@ -125,7 +125,9 @@ def spicy(
         image, so the data never need to fit in memory. Reading is fastest when the rows are grouped by image (as
         spatialdata writes a table sorted by region); categorical image and cell-type columns keep the codes small.
     condition
-        Column of the image-level condition (two or more groups).
+        Column of the image-level condition: two groups; more than two groups (each level against the reference,
+        and an overall test of all of them); or a number with more than two values, taken as continuous (the slope
+        of the effect on it). Make a numeric column categorical to compare its values as groups.
     subject
         Column of the patient of each image. Images of one patient are combined; by default each image is a
         patient.
@@ -278,7 +280,7 @@ def spicy(
         Z_extra = Z_extra - np.nanmean(Z_extra, axis=0)
 
     radii = [np.nan] if k is not None else sorted(set(np.atleast_1d(r).astype(float)))
-    if len(radii) > 1 and not is_surv and len(ctx.levels) > 2:
+    if len(radii) > 1 and not is_surv and (ctx.continuous or len(ctx.levels) > 2):
         raise ValueError("several radii are supported for two conditions; give one `r`.")
     if combine == "maxT" and len(radii) > 6 and not is_surv:
         raise ValueError('combine="maxT" supports up to 6 radii; use combine="davies" for more.')
@@ -333,7 +335,7 @@ def spicy(
                 )
             ]
         )
-        if len(ctx.levels) > 2:
+        if ctx.continuous or len(ctx.levels) > 2:
             res = _levels(ctx, graphs[0], pairs, variance, adjust_abundance, Z_extra, extra_names)
         else:
             res = _pairs(ctx, graphs, pairs, variance, adjust_abundance, Z_extra, extra_names, radii, combine, cores)
@@ -364,7 +366,7 @@ def _model_matrix(pheno, covariates):
 
 
 def _levels(ctx, g, pairs, variance, adjust, Z_extra, extra_names):
-    """More than two conditions (one radius): each pair's design in turn, then the table."""
+    """More than two conditions or a continuous one (one radius): each pair's design in turn, then the table."""
     g.image_heterogeneity = True
     fits = [_cell.cell_pair_test(ctx, g, p[0], p[1], True, variance, adjust, Z_extra, extra_names) for p in pairs]
     return {"table": _cell.cell_table(fits, ctx, adjust or Z_extra is not None), "fits": fits}
@@ -667,7 +669,14 @@ def _results(res, ctx, pheno, condition, subject, survival, radii, k, effect="co
         survival=survival,
         radius_results=res.get("radius_table"),
         image_ids=list(ctx.image_labels),
-        condition=(None if survival else [ctx.levels[g] if g >= 0 else None for g in ctx.image_group]),
+        condition=(
+            None
+            if survival
+            else ctx.x.tolist()
+            if ctx.continuous
+            else [ctx.levels[g] if g >= 0 else None for g in ctx.image_group]
+        ),
+        continuous=ctx.continuous,
         subject=(None if subject is None else _cell.as_str(pheno[subject]).tolist()),
         pairwise_assoc=pa,
         image_weights=w,

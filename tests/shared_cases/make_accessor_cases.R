@@ -1,7 +1,7 @@
 ## Shared test cases for the accessors of the results: spicyR (R) writes what topPairs() and bind() return on the
 ## cells of make_cases.R; tests/test_accessors.py must give the same tables with top_pairs() and bind(). Rerun after
 ## any change to either front end's accessors:
-##   Rscript tests/shared_cases/make_accessor_cases.R      (needs spicyR >= 1.99.42)
+##   Rscript tests/shared_cases/make_accessor_cases.R      (needs spicyR >= 1.99.55)
 suppressPackageStartupMessages(library(spicyR))
 out_dir <- file.path("tests", "shared_cases")
 cells <- utils::read.csv(file.path(out_dir, "cells.csv"))
@@ -12,6 +12,7 @@ fits <- list(
   covariates = list(condition = "condition", subject = "patient", r = 30, covariates = c("age", "batch"),
                     adjustAbundance = TRUE, from = c("tumour", "T"), to = c("T", "B", "macro")),
   three_levels = list(condition = "stage", r = 30, from = "tumour"),
+  continuous = list(condition = "age", subject = "patient", r = 30, from = c("tumour", "T")),
   survival = list(condition = "os", subject = "patient", r = 30, covariates = "age", from = c("tumour", "T")),
   radii = list(condition = "condition", subject = "patient", r = c(10, 20, 40), from = c("tumour", "T"),
                to = c("T", "B"))
@@ -30,7 +31,9 @@ cases <- list(
   top_survival = list(fit = "survival", call = "topPairs", args = list(n = NULL)),
   top_radii = list(fit = "radii", call = "topPairs", args = list(to = "T")),
   bind_pair = list(fit = "two_groups", call = "bind", args = list(from = "tumour", to = "T")),
-  bind_pair_no_subject = list(fit = "three_levels", call = "bind", args = list(from = "tumour", to = "macro"))
+  bind_pair_no_subject = list(fit = "three_levels", call = "bind", args = list(from = "tumour", to = "macro")),
+  top_continuous = list(fit = "continuous", call = "topPairs", args = list(n = NULL)),
+  bind_continuous = list(fit = "continuous", call = "bind", args = list(from = "tumour", to = "T"))
 )
 res <- lapply(fits, function(a) suppressMessages(do.call(spicy, c(list(cells = cells), a))))
 for (nm in names(cases)) {

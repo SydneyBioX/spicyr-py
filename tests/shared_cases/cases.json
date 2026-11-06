@@ -126,5 +126,40 @@
     "from": "T",
     "to": ["tumour", "B"],
     "covariates": "age_na"
+  },
+  "three_levels_hk": {
+    "condition": "stage",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T"],
+    "to": ["T", "B"],
+    "variance": "hartung_knapp"
+  },
+  "continuous": {
+    "condition": "age",
+    "subject": "patient",
+    "r": 30
+  },
+  "continuous_adjusted": {
+    "condition": "age",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T"],
+    "adjustAbundance": true,
+    "covariates": "batch"
+  },
+  "continuous_hk": {
+    "condition": "age",
+    "subject": "patient",
+    "r": 30,
+    "from": "tumour",
+    "variance": "hartung_knapp"
+  },
+  "continuous_missing": {
+    "condition": "age_na",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T"],
+    "to": ["T", "B"]
   }
 }

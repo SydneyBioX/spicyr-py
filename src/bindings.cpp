@@ -404,6 +404,19 @@ PYBIND11_MODULE(_core, m) {
   }, py::arg("rows"), py::arg("unit"), py::arg("n_units"), py::arg("Z"), py::arg("contrasts"), py::arg("k"),
      py::arg("tau2"), py::arg("hartung_knapp") = false, py::arg("n_groups") = 0);
 
+  m.def("design_joint_test", [](const py::dict& rows, const IntArray& unit, const DoubleArray& Z,
+                                const DoubleArray& contrasts, int k, double tau2, bool hartung_knapp) {
+    // Z: row-major images x q; contrasts: row-major k x q, tested jointly
+    int q = static_cast<int>(contrasts.size() / k);
+    JointResult r = design_joint_test(rows_from(rows), vec<int>(unit), vec<double>(Z), q, vec<double>(contrasts), k,
+                                      tau2, hartung_knapp);
+    py::dict o;
+    o["ok"] = r.ok; o["reason"] = r.reason; o["statistic"] = r.statistic; o["df1"] = r.df1; o["df2"] = r.df2;
+    o["p"] = r.p; o["wald"] = r.wald; o["tau2"] = r.tau2;
+    return o;
+  }, py::arg("rows"), py::arg("unit"), py::arg("Z"), py::arg("contrasts"), py::arg("k"), py::arg("tau2"),
+     py::arg("hartung_knapp") = false);
+
   m.def("availability_test", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_units,
                                 const DoubleArray& x, double tau2) {
     return design_dict(availability_test(rows_from(rows), vec<int>(unit), vec<int>(group), n_units, vec<double>(x), tau2));

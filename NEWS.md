@@ -1,5 +1,22 @@
 # spicyr news
 
+## 1.99.38
+
+- `spicy()` takes a continuous condition: a number with more than two values (make it categorical to compare such
+  values as groups). Each pair's per-image effect is regressed on the condition in the frailty model, with the
+  patient variance by Paule-Mandel under that design; the slope (`excess_slope`, per unit of the condition) has its
+  CR2 standard error and Satterthwaite df, and `excess_mean` is the effect at the condition's mean. Covariates and
+  `adjust_abundance` work as with groups. One radius. A numeric condition with more than two values was compared
+  as groups before. `box_plot()` draws a scatter with the fitted slope, `signif_plot()` colours the halves of each
+  disc one SD below and above the condition's mean, and the results print the condition's range.
+- More than two conditions: each pair has an overall test (`overall_F`, `overall_df1`, `overall_df2`,
+  `overall_p_value`, `overall_p_adj`), the CR2 Wald test of every level equal to the reference with the HTZ
+  small-sample F (Tipton and Pustejovsky 2015); with `variance="hartung_knapp"`, floored at CR2. With one contrast it
+  is the t test of two groups. `calibration_check()` counts the overall test, and the results print how many pairs
+  it finds.
+- Core synced from spicyR 1.99.55 (`design_joint_test`); shared cases regenerated with spicyR 1.99.55, with
+  continuous and three-condition Hartung-Knapp cases added.
+
 ## 1.99.37
 
 - The variance between a patient's images (`tau2_image`) is estimated by Paule-Mandel, as the variance between

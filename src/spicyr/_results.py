@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 
 from ._cell import p_adjust_bh
-from ._coltest import _signif
+from ._coltest import _signif, _signif1
 
 # the main columns of top_pairs(), in the order of the table; each covariate's effect and p-value follow
 _MAIN_COLUMNS = [
@@ -20,9 +20,13 @@ _MAIN_COLUMNS = [
     "excess_ref",
     "excess_comp",
     "excess_difference",
+    "excess_mean",
+    "excess_slope",
     "hazard_ratio_sd",
     "p_value",
     "p_adj",
+    "overall_p_value",
+    "overall_p_adj",
 ]
 # top_pairs(n=): 10, or with a cutoff every pair below it
 _ALL_BELOW_CUTOFF = object()
@@ -76,6 +80,12 @@ class SpicyResults:
     (``abundance_effect``, ``<covariate>_effect``, ...) and the unadjusted test (``unadjusted_*``).
     ``image_weights`` gives, for every pair, each image's share of its condition's information. For survival: the score test
     (``score_coefficient``, ``p_value``) and the hazard ratio per SD of the shrunken excess.
+
+    With more than two conditions each pair also has its overall test (``overall_F`` on ``overall_df1`` and
+    ``overall_df2`` df, ``overall_p_value``, ``overall_p_adj``: the CR2 Wald test of every level equal to the
+    reference, with the HTZ small-sample F of Tipton and Pustejovsky). With a continuous condition (``continuous``),
+    one row per pair: the effect at the condition's mean (``excess_mean``) and its slope per unit of the condition
+    (``excess_slope``), with its CR2 standard error and Satterthwaite df; ``condition`` holds each image's value.
     """
 
     cell_results: pd.DataFrame
@@ -92,6 +102,7 @@ class SpicyResults:
     method: str = "cell"
     effect: str = "allocation"
     variance: str | None = None
+    continuous: bool = False
 
     # --- spicyR-style matrices -----------------------------------------------------------------------
     def _wide(self, col):
@@ -107,13 +118,16 @@ class SpicyResults:
                 k = (t["level"] == l).to_numpy()
                 out[f"condition{l}"] = pd.Series(t.loc[k, col].to_numpy(), index=key[k]).reindex(labels)
             return out
+        if self.continuous:
+            first = t["excess_mean"] if col == "excess_slope" else np.nan
+            return pd.DataFrame({"(Intercept)": first, "condition": t[col]}, index=t.index)
         term = "condition" if self.survival else f"condition{self.levels[1]}"
         first = t["excess_ref"] if col == "excess_difference" and not self.survival else np.nan
         return pd.DataFrame({"(Intercept)": first, term: t[col]}, index=t.index)
 
     @property
     def coefficient(self) -> pd.DataFrame:
-        return self._wide("log_hr_sd" if self.survival else "excess_difference")
+        return self._wide("log_hr_sd" if self.survival else "excess_slope" if self.continuous else "excess_difference")
 
     @property
     def p_value(self) -> pd.DataFrame:
@@ -268,6 +282,8 @@ class SpicyResults:
         if "subject" not in d.columns:
             d["subject"] = d["imageID"]
         d = d[np.isfinite(d["excess"].to_numpy(float))]
+        if self.continuous:
+            return self._scatter(d, from_, to, key, ax, interactive)
         d["relative"] = d["weight"] / d.groupby("condition")["weight"].transform("mean")
         groups = [g for g in (self.levels or []) if (d["condition"] == g).any()]
         sized = bool(np.isfinite(d["relative"]).any())
@@ -305,6 +321,53 @@ class SpicyResults:
         ax.set_xticks(range(1, len(groups) + 1), groups)
         ax.axhline(0, color="grey", lw=0.8, ls="--", zorder=0)
         ax.set_ylabel(ylabel.replace("<br>", "\n"))
+        ax.set_title(title)
+        ax.spines[["top", "right"]].set_visible(False)
+        return ax
+
+    def _scatter(self, d, from_, to, key, ax, interactive):
+        """A continuous condition: the per-image excess against the condition, with the fitted slope."""
+        d = d[np.isfinite(d["condition"].to_numpy(float))]
+        if self.effect == "allocation":
+            ylabel, title = f"Extra fraction of {to} next to {from_}\n(beyond chance)", f"{to} next to {from_}"
+        else:
+            ylabel, title = f"Extra {from_} per {to}\n(beyond chance)", f"{from_} around {to}"
+        b = self.coefficient.loc[key].to_numpy(float)
+        x = d["condition"].to_numpy(float)
+        xs = np.array([x.min(), x.max()])
+        line = b[0] + b[1] * (xs - x.mean())  # the excess at these images' mean condition, and the slope
+        if interactive:
+            import plotly.graph_objects as go
+
+            fig = go.Figure(
+                go.Scatter(
+                    x=x,
+                    y=d["excess"],
+                    mode="markers",
+                    marker={"color": "grey", "opacity": 0.6},
+                    text=d["imageID"],
+                    name="images",
+                )
+            )
+            if np.all(np.isfinite(b)):
+                fig.add_trace(go.Scatter(x=xs, y=line, mode="lines", line={"color": "#D73027"}, name="fit"))
+            fig.update_layout(
+                title=title,
+                xaxis_title="condition",
+                yaxis_title=ylabel.replace("\n", "<br>"),
+                template="simple_white",
+                showlegend=False,
+            )
+            return fig
+        import matplotlib.pyplot as plt
+
+        ax = ax or plt.figure(figsize=(4.5, 4.5)).gca()
+        ax.scatter(x, d["excess"], s=12, color="grey", alpha=0.6, lw=0)
+        if np.all(np.isfinite(b)):
+            ax.plot(xs, line, color="#D73027")
+        ax.axhline(0, color="grey", lw=0.8, ls="--", zorder=0)
+        ax.set_xlabel("condition")
+        ax.set_ylabel(ylabel)
         ax.set_title(title)
         ax.spines[["top", "right"]].set_visible(False)
         return ax
@@ -380,7 +443,8 @@ class SpicyResults:
         """Bubble plot of every pair, as spicyR's ``signifPlot()``.
 
         Each pair is a disc at (to, from). Its left half is coloured by the excess in the reference condition and
-        its right half by the excess in the comparison condition; the radius grows with -log10 p (the BH-adjusted p
+        its right half by the excess in the comparison condition (for a continuous condition, one SD across images
+        below and above the condition's mean); the radius grows with -log10 p (the BH-adjusted p
         with ``fdr=True``), and a black
         ring marks p (or, with ``fdr=True``, the BH-adjusted p) below ``cutoff``. ``breaks`` is
         ``(low, high, step)`` for the colour scale. For survival results each disc is one colour: the log hazard
@@ -395,6 +459,17 @@ class SpicyResults:
         if self.survival:
             pv, a, b = t["p_value"].to_numpy(float), t["log_hr_sd"].to_numpy(float), t["log_hr_sd"].to_numpy(float)
             fr_, to_ = t["from"].to_numpy(), t["to"].to_numpy()
+        elif self.continuous:
+            if comparison_group is not None:
+                raise ValueError("`comparison_group` is for a condition with groups; this condition is continuous.")
+            coef = "condition"
+            cf = self.coefficient
+            sdx = np.nanstd(np.asarray(self.condition, dtype=float), ddof=1)
+            pv = self.p_value[coef].to_numpy(float)
+            a = cf["(Intercept)"].to_numpy(float) - sdx * cf[coef].to_numpy(float)
+            b = cf["(Intercept)"].to_numpy(float) + sdx * cf[coef].to_numpy(float)
+            ft = self.p_value.index.to_series().str.split("__", n=1, expand=True)
+            fr_, to_ = ft[0].to_numpy(), ft[1].to_numpy()
         else:
             cond = [c for c in self.p_value.columns if c.startswith("condition")]
             coef = cond[0] if comparison_group is None else f"condition{comparison_group}"
@@ -513,7 +588,9 @@ class SpicyResults:
                     th = (90, 270) if self.left else (-90, 90)
                     return [Wedge((x0 + width / 2, y0 + height / 2), r, *th, facecolor="grey", transform=trans)]
 
-            ref, comp = self.levels[0], coef[len("condition") :]
+            ref, comp = (
+                ("mean - 1 SD", "mean + 1 SD") if self.continuous else (self.levels[0], coef[len("condition") :])
+            )
             hl, hr = Line2D([], []), Line2D([], [])
             fig.legend(
                 handles=[hl, hr],
@@ -536,6 +613,8 @@ class SpicyResults:
         what = (
             "association with survival"
             if self.survival
+            else "slope on the condition"
+            if self.continuous
             else "; ".join(f"{l} vs {self.levels[0]}" for l in self.levels[1:])
         )
         scale = (
@@ -544,7 +623,10 @@ class SpicyResults:
         lines = [f"spicyr (cell-level test): {n} pairs, {what}, {scale}"]
         unit = self.subject if self.subject is not None else self.image_ids
         groups = ""
-        if self.condition is not None:
+        if self.condition is not None and self.continuous:
+            x = np.asarray(self.condition, dtype=float)[~pd.Series(unit).duplicated().to_numpy()]
+            groups = f" (condition from {_signif1(float(np.nanmin(x)), 3):g} to {_signif1(float(np.nanmax(x)), 3):g})"
+        elif self.condition is not None:
             first = ~pd.Series(unit).duplicated().to_numpy()  # each patient's condition, from its first image
             count = pd.Series(np.asarray(self.condition, dtype=object)[first]).value_counts()
             groups = " (" + ", ".join(f"{l} {int(count.get(l, 0))}" for l in self.levels) + ")"
@@ -586,5 +668,11 @@ class SpicyResults:
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
         if "unadjusted_p_adj" in t.columns:
             sig += f" ({int((t['unadjusted_p_adj'] < 0.05).sum())} without adjustment)"
+        if "overall_p_adj" in t.columns:
+            first = (t["level"] == t["level"].iloc[0]).to_numpy()
+            sig += (
+                "\nOverall test (every level against the reference), BH-adjusted p < 0.05: "
+                f"{int((t.loc[first, 'overall_p_adj'] < 0.05).sum())} pairs"
+            )
         lines += [sig, "See top_pairs()."]
         return "\n".join(lines)

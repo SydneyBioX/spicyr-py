@@ -76,6 +76,8 @@ def calibration_check(
 ):
     """Check that :func:`spicyr.spicy` is calibrated on your data by shuffling the condition.
 
+    The condition may be groups, a number (continuous) or a survival outcome.
+
     Shuffles the condition across patients (or across images, without ``subject``), which removes any real
     difference between the groups while keeping everything else about the study, and runs :func:`spicyr.spicy` on
     each shuffle. If the test is calibrated, about 5% of pairs have p < 0.05 and about 1% p < 0.01 in each shuffle.
@@ -156,7 +158,12 @@ def calibration_check(
                 res = spicy(cells, condition=new[0], subject=subject, image_id=image_id, **kwargs)
             else:
                 res = spicy(cells, survival=tuple(new), subject=subject, image_id=image_id, **kwargs)
-            p = res.cell_results["p_value"].dropna()  # the pairs tested
+            t = res.cell_results
+            # the pairs tested; more than two conditions: the overall test of each pair
+            if "overall_p_value" in t.columns:
+                p = t.loc[t["level"] == t["level"].iloc[0], "overall_p_value"].dropna()
+            else:
+                p = t["p_value"].dropna()
             rows += [(i + 1, t, 100 * float((p < t).mean())) for t in thresholds]
     finally:
         obs.drop(columns=[n for n in new if n in obs.columns], inplace=True)
