@@ -1,5 +1,11 @@
 # spicyr news
 
+## 1.99.39
+
+- The overall test of more than two conditions is faster: core synced from spicyR 1.99.56, which sums the variance
+  of its covariance estimate in one pass over the patients instead of over every pair of patients (identical
+  results).
+
 ## 1.99.38
 
 - `spicy()` takes a continuous condition: a number with more than two values (make it categorical to compare such
