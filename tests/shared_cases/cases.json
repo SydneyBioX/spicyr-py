@@ -86,7 +86,8 @@
     "subject": "patient",
     "r": [10, 20, 40],
     "from": "tumour",
-    "to": ["T", "B", "macro"]
+    "to": ["T", "B", "macro"],
+    "combine": "maxT"
   },
   "radii_cauchy": {
     "condition": "condition",
@@ -193,7 +194,8 @@
     "subject": "patient",
     "r": [5, 10, 15, 20, 25, 30, 35, 40],
     "from": "tumour",
-    "to": ["T", "B"]
+    "to": ["T", "B"],
+    "combine": "maxT"
   },
   "radii_maxT_adjusted": {
     "condition": "condition",
@@ -202,7 +204,8 @@
     "from": ["tumour", "T"],
     "to": ["T", "B"],
     "adjustAbundance": true,
-    "covariates": "batch"
+    "covariates": "batch",
+    "combine": "maxT"
   },
   "image_covariate": {
     "condition": "condition",

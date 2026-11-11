@@ -11,7 +11,7 @@ cases <- list(
   covariates_missing = c(base, list(r = 30, covariates = c("age_na", "batch"), adjustAbundance = TRUE)),
   hartung_knapp_adjusted = c(base, list(r = 30, covariates = "age", adjustAbundance = TRUE, variance = "hartung_knapp")),
   knn_adjusted = c(base, list(k = 10, adjustAbundance = TRUE)),
-  radii_adjusted = c(base, list(r = c(10, 20, 40), covariates = c("age_na", "batch"), adjustAbundance = TRUE)),
+  radii_adjusted = c(base, list(r = c(10, 20, 40), covariates = c("age_na", "batch"), adjustAbundance = TRUE, combine = "maxT")),
   radii_davies_adjusted = c(base, list(r = seq(5, 40, by = 5), combine = "davies", effect = "count",
                                        adjustAbundance = TRUE, from = c("tumour", "T"))),
   radii_cauchy_covariates = c(base, list(r = c(10, 20, 40), combine = "cauchy", covariates = "age"))

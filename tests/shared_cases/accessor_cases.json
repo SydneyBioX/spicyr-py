@@ -37,7 +37,8 @@
       "subject": "patient",
       "r": [10, 20, 40],
       "from": ["tumour", "T"],
-      "to": ["T", "B"]
+      "to": ["T", "B"],
+      "combine": "maxT"
     },
     "follow_ups": {
       "condition": "grp3",

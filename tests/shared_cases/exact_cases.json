@@ -45,7 +45,8 @@
     "subject": "patient",
     "r": [10, 20, 40],
     "covariates": ["age_na", "batch"],
-    "adjustAbundance": true
+    "adjustAbundance": true,
+    "combine": "maxT"
   },
   "radii_davies_adjusted": {
     "condition": "condition",

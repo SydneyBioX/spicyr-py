@@ -1,5 +1,15 @@
 # spicyr news
 
+## 1.99.41
+
+- `combine="davies"` is now the default for several radii (it was `"maxT"`), as in spicyR 1.99.58. Davies' bound is a
+  closed form that is never smaller than the exact max-T p-value and takes microseconds for any number of radii; in the
+  calibration it stayed at or below nominal in every cohort, where max-T was slightly liberal in large cohorts, at the
+  cost of p-values about 1.1 times the exact ones with 4 radii and 1.3 to 1.4 times with 8 to 16. `combine="maxT"`
+  gives the exact p-value as before. Results with one radius, or with `combine` given, are unchanged.
+- The documentation and the tutorial recommend choosing one radius from the relationship of interest when it is known,
+  and several radii only when the scale is unknown.
+
 ## 1.99.40
 
 - Adjusted tests (covariates, `adjust_abundance=True`) when an adjustment varies between a patient's images (the

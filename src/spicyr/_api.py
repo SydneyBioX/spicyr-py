@@ -29,7 +29,7 @@ def spicy(
     method="cell",
     effect="allocation",
     k=None,
-    combine="maxT",
+    combine="davies",
     adjust_abundance=False,
     variance="cr2",
     ref=None,
@@ -167,14 +167,16 @@ def spicy(
         the effect.
     r
         Radius, or several radii combined by ``combine`` (two conditions only; a survival outcome takes one radius):
-        "maxT" (the default, any number of radii), "davies" (Davies' bound for the same maximum; faster, slightly
-        conservative) or "cauchy". Default 50. The max-T p-value is the multivariate normal probability that the
+        "davies" (the default: Davies' upper bound on the max-T p-value, a closed form that is never smaller than the
+        exact p-value and takes microseconds for any number of radii; slightly conservative), "maxT" (the exact max-T
+        p-value) or "cauchy". Default 50. The max-T p-value is the multivariate normal probability that the
         largest absolute z over the radii is at least the one observed, computed as a sum of first-exceedance terms
         by the quasi-Monte Carlo method of Genz and Bretz to a relative error of about 0.1% (by quadrature for two
         radii); the same inputs always give the same value. A radius whose correlation with a smaller kept radius
         exceeds 0.995 is left out. ``cell_results`` then has ``maxT_converged``: True when the pair's p-value met the
-        error target. We recommend about 4 radii spanning the range of interest, none below about one cell diameter:
-        many closely spaced radii add little information, cost some power and are slower.
+        error target. Choose one radius from the relationship of interest when you can; when the scale is unknown, we
+        recommend about 4 radii spanning the range of interest, none below about one cell diameter: many closely
+        spaced radii add little information, cost some power and, with max-T, are slower.
     from_, to
         Cell types to test (all ordered pairs by default).
     method

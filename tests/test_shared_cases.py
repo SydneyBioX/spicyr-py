@@ -85,7 +85,8 @@ def test_variance():
 
 def test_maxt_any_number_of_radii():
     """max-T takes any number of radii (it stopped at 6 up to 1.99.39) and reports whether its p-value converged."""
-    res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=list(range(5, 45, 5)), from_="tumour", to="T")
+    res = spicyr.spicy(CELLS, condition="condition", subject="patient", r=list(range(5, 45, 5)), from_="tumour", to="T",
+                       combine="maxT")
     assert res.cell_results["maxT_converged"].tolist() == [True]
     res = spicyr.spicy(
         CELLS, condition="condition", subject="patient", r=[10, 20], from_="tumour", to="T", combine="cauchy"
@@ -153,3 +154,13 @@ def test_df_guard():
         rows, unit, 4, M, np.arange(1.0, 5.0), np.array([1, 0, 0, 0], dtype=np.int32), np.zeros(0), 0, np.zeros(0), 0
     )
     assert not z["ok"] and z["reason"] == "too_few_df"
+
+
+def test_davies_is_the_default_for_several_radii():
+    """combine="davies" is the default (1.99.41); its bound is never below the exact max-T p-value."""
+    kw = dict(condition="condition", subject="patient", r=[10, 20, 40], from_="tumour", to="T")
+    dflt = spicyr.spicy(CELLS, **kw).cell_results
+    dv = spicyr.spicy(CELLS, combine="davies", **kw).cell_results
+    mt = spicyr.spicy(CELLS, combine="maxT", **kw).cell_results
+    pd.testing.assert_frame_equal(dflt, dv)
+    assert dv["p_value"].iloc[0] >= mt["p_value"].iloc[0] * (1 - 2e-3)

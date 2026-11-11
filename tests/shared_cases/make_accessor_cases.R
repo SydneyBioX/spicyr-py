@@ -15,7 +15,7 @@ fits <- list(
   continuous = list(condition = "age", subject = "patient", r = 30, from = c("tumour", "T")),
   survival = list(condition = "os", subject = "patient", r = 30, covariates = "age", from = c("tumour", "T")),
   radii = list(condition = "condition", subject = "patient", r = c(10, 20, 40), from = c("tumour", "T"),
-               to = c("T", "B")),
+               to = c("T", "B"), combine = "maxT"),
   follow_ups = list(condition = "grp3", subject = "patient", r = 30, from = c("tumour", "T", "macro"), to = c("T", "B"),
                     alpha = 0.2)
 )
