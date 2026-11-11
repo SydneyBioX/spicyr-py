@@ -95,6 +95,8 @@ class Context:
     # the allocation self-pair variance with a radius: "sampled" (the default), "exact", "geometricSampled" or
     # "geometric", and the cells sampled per image (spicy()'s self_variance and self_variance_cells)
     self_var: tuple = ("sampled", 50)
+    # more than two conditions: the level of the overall test at which pairs are called for follow-up comparisons
+    alpha: float = 0.05
 
     def has(self, name) -> bool:
         return self.source.has(name) or (self.images is not None and name in self.images.columns)
@@ -467,16 +469,30 @@ def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     if g.effect == "allocation":
         # the pair's side, chosen in the core from the images (attraction scales by 1 - q, avoidance by q)
         side = "avoid" if float(np.sum(rows["O"] - rows["E"])) < 0 else "attract"
-    # images within a patient: each row becomes its effect (O - E) / n with variance v / n^2 + tau2_image
-    if g.image_heterogeneity and len(rows["O"]):
-        h = _core.image_heterogeneity_rows(rows, rows["unit"])
-        for key in ("unit", "group"):
-            if key in rows:
-                h[key] = rows[key]
-        rows = h
+    if g.image_heterogeneity:
+        rows = cell_image_effect(ctx, rows)
     if side is not None:
         rows["side"] = side
     return rows
+
+
+def cell_image_effect(ctx: Context, rows: dict) -> dict:
+    """The image random effect of a pair's rows (cell_rows() and cell_weighted()).
+
+    Each row becomes its effect (O - E) / n with variance v / n^2 + tau2_image (Paule-Mandel within patients),
+    keeping the unit, the condition, ``tau2_image`` and the rows' sampling variance ``s2`` (for an adjusted design's
+    B2). With more than two conditions the raw rows go along (``raw``) for the follow-up comparisons, which estimate
+    their own between-image variance.
+    """
+    if not len(rows["O"]):
+        return rows
+    h = _core.image_heterogeneity_rows(rows, rows["unit"])
+    for key in ("unit", "group"):
+        if key in rows:
+            h[key] = rows[key]
+    if ctx.levels is not None and len(ctx.levels) > 2 and not ctx.continuous:
+        h["raw"] = rows
+    return h
 
 
 def is_weight_vector(weights) -> bool:
@@ -596,12 +612,7 @@ def cell_weighted(
             side = None
             if allocation:
                 side = "avoid" if float(np.sum(rows["O"] - rows["E"])) < 0 else "attract"
-            if len(rows["O"]):
-                h = _core.image_heterogeneity_rows(rows, rows["unit"])
-                for key in ("unit", "group"):
-                    if key in rows:
-                        h[key] = rows[key]
-                rows = h
+            rows = cell_image_effect(ctx, rows)
             if side is not None:
                 rows["side"] = side
             if survival_test is not None:
@@ -612,15 +623,21 @@ def cell_weighted(
 
 
 def _subset_rows(rows, keep) -> dict:
-    return {k: (v[keep] if isinstance(v, np.ndarray) else v) for k, v in rows.items()}
+    return {k: (v[keep] if isinstance(v, np.ndarray) else v) for k, v in rows.items() if k != "raw"}
 
 
 def add_side(row: dict, o: dict) -> dict:
-    """Add the allocation side and the between-image variance of a fit to its table row."""
+    """Add the allocation side and the between-image variance of a fit to its table row.
+
+    The image variance is that of the main test: B2's in an adjusted design with an image-level column, else the
+    rows'.
+    """
     rows = o.get("rows")
     if rows is not None and "side" in rows:
         row["side"] = rows["side"]
-    if rows is not None and "tau2_image" in rows:
+    if o.get("tau2_image") is not None:
+        row["tau2_image"] = o["tau2_image"]
+    elif rows is not None and "tau2_image" in rows:
         row["tau2_image"] = rows["tau2_image"]
     return row
 
@@ -673,28 +690,48 @@ def _condition_block(ctx, rows):
     return (rows["group"][:, None] == np.arange(len(ctx.levels))[None, :]).astype(float)
 
 
-def _design_tau2(d, G, frailty, tau2):
-    """tau2 of the adjusted design.
+def _adjusted(d, G, frailty):
+    """The variance components of the adjusted design (the core's adjusted_design).
 
-    Re-estimated when every added column is constant within patients, else held at the unadjusted value
-    (new_methods.pdf, Remark 3).
+    When every added column is constant within patients, tau2 is re-estimated under the design (exact Paule-Mandel;
+    tau2 = -1). When one varies between a patient's images: the image variance is re-estimated within patients after
+    the image-level columns (B2, from the rows' s2), each such column gets a second column, its average over the
+    patient's images (its own coefficient is then the within-patient slope), and tau2 is Paule-Mandel on the patient
+    summaries. G: the condition's columns (first in d["Z"]). Adds to d q_added (its columns before any mean column),
+    tau2 and, for rows with the image random effect, omega2; the rows and Z become those of the fit.
     """
-    if not frailty:
-        return 0.0
-    X = d["Z"][:, G:]
-    unit = d["rows"]["unit"]
-    patient_level = all(pd.Series(X[:, j]).groupby(unit).nunique().eq(1).all() for j in range(X.shape[1]))
-    return -1.0 if patient_level else float(tau2)
+    d = dict(d, q_added=d["Z"].shape[1], omega2=None)
+    rows = d["rows"]
+    Z = np.ascontiguousarray(d["Z"], dtype=float)
+    a = _core.adjusted_design(rows, rows["unit"], Z.ravel(), Z.shape[1], int(G), bool(frailty))
+    if not a["image_level"]:
+        d["tau2"] = -1.0 if frailty else 0.0
+        return d
+    if "s2" in rows:  # (rows without the image random effect have none)
+        d["omega2"] = a["omega2"]
+    new = a["rows"]
+    new["unit"] = rows["unit"]
+    if "group" in rows:
+        new["group"] = rows["group"]
+    d.update(rows=new, Z=np.asarray(a["Z"]), tau2=a["tau2"])
+    return d
 
 
-def _contrasts(G, q):
-    """The level differences, then one row per added column (its effect)."""
+def _contrasts(G, q, d=None):
+    """The level differences, then one row per added column (its effect); zero columns for d's patient-mean columns."""
     C = np.zeros((G - 1 + q - G, q))
     for l in range(1, G):
         C[l - 1, 0], C[l - 1, l] = -1.0, 1.0
     for j in range(q - G):
         C[G - 1 + j, G + j] = 1.0
-    return C
+    return _pad(C, d)
+
+
+def _pad(C, d=None):
+    """Zero columns for the patient-mean columns of an adjusted design d (none when there are none)."""
+    if d is None or d["Z"].shape[1] == C.shape[1]:
+        return C
+    return np.hstack([C, np.zeros((C.shape[0], d["Z"].shape[1] - C.shape[1]))])
 
 
 def _design_tests(rows, m, Z, C, tau2, hk, n_groups=0):
@@ -719,6 +756,12 @@ def _few_effective(n_eff, m, rules) -> bool:
     """True when a condition's effective patients n_eff fall below min(3, m_g / 2), m_g its patients with rows."""
     m = np.asarray(m, dtype=float)
     return bool((np.asarray(n_eff, dtype=float) < np.minimum(rules["min_n_eff"], m / 2)).any())
+
+
+def _too_few_df(df, rules) -> bool:
+    """True when a test's Satterthwaite df are below the core's minimum (1) or not finite: not tested ("too_few_df")."""
+    df = np.atleast_1d(np.asarray(df, dtype=float))
+    return bool((~np.isfinite(df) | (df < rules["min_df"])).any())
 
 
 def _no_information(rows, G) -> bool:
@@ -765,6 +808,8 @@ def cell_rows_test(ctx, rows, f, t, frailty, variance, adjust, Z_extra=None, ext
         skip = "no_information"
     elif rules["min_effective_units"] and r["se"] > 0 and _few_effective(r["n_eff"], r["n_units"], rules):
         skip = "few_effective_units"
+    elif r["se"] > 0 and _too_few_df(r["df"], rules):
+        skip = "too_few_df"
     if skip is not None:
         out["test"] = dict(r, p=np.nan)
         out["unadjusted"] = out["test"]
@@ -780,12 +825,13 @@ def cell_rows_test(ctx, rows, f, t, frailty, variance, adjust, Z_extra=None, ext
         out["test"] = dict(r, p=np.nan)
         out["adjusted_for"] = "none (no_variation)"
         return out
+    d = _adjusted(d, 2, frailty)
     a = _design_tests(
         d["rows"],
         m,
         d["Z"],
-        _contrasts(2, d["Z"].shape[1]),
-        _design_tau2(d, 2, frailty, r["tau2"]),
+        _contrasts(2, d["q_added"], d),
+        d["tau2"],
         variance == "hartung_knapp",
         2 if rules["pooled_dispersion"] else 0,
     )
@@ -794,6 +840,12 @@ def cell_rows_test(ctx, rows, f, t, frailty, variance, adjust, Z_extra=None, ext
         out["adjusted_for"] = f"none ({a[0]['reason']})"
         return out
     x = a[0]
+    if _too_few_df(x["df"], rules):  # the adjusted design's df are too few: not tested
+        out["test"] = dict(out["test"], p=np.nan)
+        out["unadjusted"] = dict(out["unadjusted"], p=np.nan)
+        out["not_tested"] = "too_few_df"
+        out["adjusted_for"] = "none (too_few_df)"
+        return out
     out["test"] = {
         "coef_ref": x["theta"][0],
         "coef_comp": x["theta"][1],
@@ -806,6 +858,7 @@ def cell_rows_test(ctx, rows, f, t, frailty, variance, adjust, Z_extra=None, ext
     }
     out["effects"] = dict(zip(d["extra"], a[1:], strict=True))
     out["adjusted_for"] = d["adjusted_for"]
+    out["tau2_image"] = d["omega2"]
     return out
 
 
@@ -835,6 +888,9 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
     if _no_information(rows, G):
         out["reason"] = "no_information"
         return out
+    if _too_few_df([x["df"] for x in u], rules):
+        out["reason"] = "too_few_df"
+        return out
     if rules["min_effective_units"]:
         n_eff = np.asarray(_core.effective_units(rg, rg["unit"], rg["group"], G, u[0]["tau2"]))
         if _few_effective(n_eff, per_level.to_numpy(), rules):
@@ -842,23 +898,62 @@ def cell_pair_test_levels(ctx, rows, f, t, frailty, variance, adjust, Z_extra, e
             return out
     un = dict(zip(ctx.levels[1:], u, strict=True))
     out.update(ok=True, levels_test=un, unadjusted_levels=un, test={"coef_ref": u[0]["theta"][0], "tau2": u[0]["tau2"]})
+    # the follow-up comparison of levels a and b (0-based), run only for pairs the overall test calls (follow_ups())
+    out["compare"] = lambda a, b: _level_comparison(
+        ctx, rows, f, t, a, b, frailty, variance, adjust, Z_extra, extra_names
+    )
     # the overall test: every level equal to the reference, jointly (HTZ)
     out["overall"] = out["unadjusted_overall"] = _joint_test(rg, Zg, _contrasts(G, G), u[0]["tau2"], hk)
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
-    a = _design_tests(
-        d["rows"], m, d["Z"], _contrasts(G, d["Z"].shape[1]), _design_tau2(d, G, frailty, u[0]["tau2"]), hk, ng
-    )
+    d = _adjusted(d, G, frailty)
+    a = _design_tests(d["rows"], m, d["Z"], _contrasts(G, d["q_added"], d), d["tau2"], hk, ng)
     if not a[0]["ok"]:
         out["adjusted_for"] = f"none ({a[0]['reason']})"
         return out
-    out["overall"] = _joint_test(d["rows"], d["Z"], _contrasts(G, d["Z"].shape[1])[: G - 1], a[0]["tau2"], hk)
+    if _too_few_df([x["df"] for x in a[: G - 1]], rules):
+        out["ok"] = False
+        out["reason"] = "too_few_df"
+        return out
+    out["overall"] = _joint_test(d["rows"], d["Z"], _contrasts(G, d["q_added"], d)[: G - 1], a[0]["tau2"], hk)
     out["levels_test"] = dict(zip(ctx.levels[1:], a[: G - 1], strict=True))
     out["effects"] = dict(zip(d["extra"], a[G - 1 :], strict=True))
     out["test"] = {"coef_ref": a[0]["theta"][0], "tau2": a[0]["tau2"]}
     out["adjusted_for"] = d["adjusted_for"]
+    out["tau2_image"] = d["omega2"]
     return out
+
+
+def _level_comparison(ctx, rows, f, t, a, b, frailty, variance, adjust, Z_extra, extra_names) -> dict:
+    """The follow-up comparison of levels a and b (0-based) of a pair: level a is the reference.
+
+    The two-condition test (cell_rows_test(), with its rules and adjustments) on the patients of those two levels
+    only, as if the data held only them. The between-image variance is estimated again on those patients (from the
+    raw rows, when the rows carry the image random effect); the pair's side stays the one chosen from every image, as
+    for the overall test.
+    """
+    n_units = len(ctx.unit_labels)
+    first = np.full(n_units, -1)
+    first[ctx.image_unit[::-1]] = np.arange(ctx.n_images)[::-1]  # each patient's first image
+    lev_unit = np.where(first >= 0, ctx.image_group[np.maximum(first, 0)], -1)  # each patient's level
+    sel = np.flatnonzero(np.isin(lev_unit, [a, b]))
+    raw = rows.get("raw")
+    src = rows if raw is None else raw
+    keep = np.isin(src["group"], [a, b])
+    s = {k: v[keep] for k, v in src.items() if isinstance(v, np.ndarray)}
+    new_unit = np.full(n_units, -1, dtype=np.int32)
+    new_unit[sel] = np.arange(len(sel), dtype=np.int32)
+    s["unit"] = new_unit[s["unit"]].astype(np.int32)
+    s["group"] = (s["group"] == b).astype(np.int32)
+    if raw is not None and len(s["O"]):
+        h = _core.image_heterogeneity_rows(s, s["unit"])
+        h["unit"], h["group"] = s["unit"], s["group"]
+        s = h
+    if "side" in rows:
+        s["side"] = rows["side"]
+    sub = replace(ctx, levels=[ctx.levels[a], ctx.levels[b]], unit_labels=[ctx.unit_labels[i] for i in sel])
+    return cell_rows_test(sub, s, f, t, frailty, variance, adjust, Z_extra, extra_names)
 
 
 def cell_pair_test_continuous(ctx, rows, f, t, frailty, variance, adjust, Z_extra, extra_names) -> dict:
@@ -882,6 +977,9 @@ def cell_pair_test_continuous(ctx, rows, f, t, frailty, variance, adjust, Z_extr
     if _no_information(rows, 1):
         out["reason"] = "no_information"
         return out
+    if _too_few_df(u["df"], rules):
+        out["reason"] = "too_few_df"
+        return out
     if rules["min_effective_units"]:
         n_eff = np.asarray(_core.effective_units(rg, rg["unit"], rg["group"], 1, u["tau2"]))
         if _few_effective(n_eff, [len(set(rg["unit"]))], rules):
@@ -902,14 +1000,19 @@ def cell_pair_test_continuous(ctx, rows, f, t, frailty, variance, adjust, Z_extr
     d = _design(ctx, rows, f, adjust, Z_extra, extra_names)
     if d is None:
         return out
-    q = d["Z"].shape[1]
-    a = _design_tests(d["rows"], m, d["Z"], np.eye(q)[1:], _design_tau2(d, 2, frailty, u["tau2"]), hk)
+    d = _adjusted(d, 2, frailty)
+    a = _design_tests(d["rows"], m, d["Z"], _pad(np.eye(d["q_added"])[1:], d), d["tau2"], hk)
     if not a[0]["ok"]:
         out["adjusted_for"] = f"none ({a[0]['reason']})"
+        return out
+    if _too_few_df(a[0]["df"], rules):
+        out["ok"] = False
+        out["reason"] = "too_few_df"
         return out
     out["test"] = slope(a[0])
     out["effects"] = dict(zip(d["extra"], a[1:], strict=True))
     out["adjusted_for"] = d["adjusted_for"]
+    out["tau2_image"] = d["omega2"]
     return out
 
 
@@ -947,6 +1050,7 @@ FIRST_COLUMNS = [
     "overall_p_value",
     "overall_p_adj",
     "p_value_best_radius",
+    "maxT_converged",
     "tau2",
     "tau2_image",
     "not_tested",
@@ -1071,6 +1175,107 @@ def cell_table_levels(fits, ctx, adjusted) -> pd.DataFrame | None:
         tab["unadjusted_overall_p_adj"] = adj_overall(tab["unadjusted_overall_p_value"])
     tab.index = tab["from"] + "__" + tab["to"] + "__" + tab["level"]
     return order_columns(tab)
+
+
+FOLLOW_UP_COLUMNS = [
+    "from",
+    "to",
+    "level_ref",
+    "level_comp",
+    "excess_ref",
+    "excess_comp",
+    "excess_difference",
+    "se",
+    "df",
+    "p_value",
+    "p_threshold",
+    "significant",
+    "overall_p_value",
+    "overall_p_adj",
+    "n_comparisons",
+    "tau2",
+    "not_tested",
+]
+
+
+def cell_follow_ups(fits, tab, ctx, adjusted, alpha) -> pd.DataFrame:
+    """The gated follow-up comparisons of more than two conditions.
+
+    For each pair called by BH on the overall test at level ``alpha`` (R of the m pairs with an overall test), all
+    G (G - 1) / 2 comparisons of two levels, each the two-condition test of those levels (_level_comparison()),
+    tested whenever its two levels pass the rules. Bonferroni within the pair at the Benjamini-Bogomolov level
+    alpha R / m: a comparison is significant when p <= alpha R / (m K), K the comparisons tested in its pair. tab:
+    the levels table (cell_table_levels()), one block of rows per fit. One row per called pair and comparison (none:
+    zero rows).
+    """
+    from itertools import combinations
+
+    first = np.flatnonzero((tab["level"] == tab["level"].iloc[0]).to_numpy())
+    ov_p = tab["overall_p_value"].to_numpy(float)[first]
+    ov_adj = tab["overall_p_adj"].to_numpy(float)[first]
+    m = int(np.sum(~np.isnan(ov_p)))
+    called = np.flatnonzero(~np.isnan(ov_adj) & (ov_adj <= alpha))
+    R = len(called)
+    cmb = list(combinations(range(len(ctx.levels)), 2))
+    rows = []
+    for i in called:
+        o = fits[i]
+        cmp = [o["compare"](a, b) for a, b in cmb]
+        tested = [bool(x.get("ok")) and x.get("not_tested") is None and bool(np.isfinite(x["test"]["p"])) for x in cmp]
+        K = sum(tested)
+        for (a, b), x, ok in zip(cmb, cmp, tested, strict=True):
+            z = x["test"] if ok else {}
+            row = {
+                "from": o["from"],
+                "to": o["to"],
+                "level_ref": ctx.levels[a],
+                "level_comp": ctx.levels[b],
+                "excess_ref": z.get("coef_ref", np.nan),
+                "excess_comp": z.get("coef_comp", np.nan),
+                "excess_difference": z.get("difference", np.nan),
+                "se": z.get("se", np.nan),
+                "df": z.get("df", np.nan),
+                "p_value": z.get("p", np.nan),
+                "p_threshold": alpha * R / (m * K) if ok else np.nan,
+            }
+            row["significant"] = bool(row["p_value"] <= row["p_threshold"]) if ok else np.nan
+            row["overall_p_value"] = ov_p[i]
+            row["overall_p_adj"] = ov_adj[i]
+            row["n_comparisons"] = K
+            row["tau2"] = z.get("tau2", np.nan)
+            add_side(row, x)
+            if ok:
+                row["not_tested"] = None
+            elif not x.get("ok"):
+                row["not_tested"] = x.get("reason") or "not_tested"
+            else:
+                row["not_tested"] = x.get("not_tested") or "not_tested"
+            if adjusted:
+                row["adjusted_for"] = x["adjusted_for"]
+                u = x["unadjusted"] if ok else {}
+                row["unadjusted_difference"] = u.get("difference", np.nan)
+                row["unadjusted_p_value"] = u.get("p", np.nan)
+            rows.append(row)
+    if not rows:  # no pair called: the columns, no rows
+        return pd.DataFrame(
+            {
+                c: pd.Series(
+                    dtype=object
+                    if c in ("from", "to", "level_ref", "level_comp", "not_tested")
+                    else bool
+                    if c == "significant"
+                    else int
+                    if c == "n_comparisons"
+                    else float
+                )
+                for c in FOLLOW_UP_COLUMNS
+            }
+        )
+    fu = pd.DataFrame(rows)
+    lead = [c for c in ("from", "to", "level_ref", "level_comp", "side") if c in fu.columns]
+    fu = fu[lead + [c for c in fu.columns if c not in lead]]
+    fu.index = fu["from"] + "__" + fu["to"] + "__" + fu["level_comp"] + "__" + fu["level_ref"]
+    return fu
 
 
 def _overall(x) -> dict:

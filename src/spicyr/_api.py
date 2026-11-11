@@ -41,6 +41,7 @@ def spicy(
     weight_labels=None,
     self_variance="sampled",
     self_variance_cells=50,
+    alpha=0.05,
     **kwargs,
 ) -> SpicyResults:
     """Test whether the co-localisation of cell types differs between conditions, or is associated with survival.
@@ -98,8 +99,36 @@ def spicy(
     from every image.
 
     Every requested pair has a row in ``cell_results``: ``not_tested`` gives why a pair (or, in ``radius_results``, a
-    radius) was not tested (``"one_patient_per_group"``, ``"no_information"``, ``"few_effective_units"`` or
-    ``"no_variation"``; None when it was), and its p-value is then NaN and not counted in the BH adjustment.
+    radius) was not tested (``"one_patient_per_group"``, ``"no_information"``, ``"few_effective_units"``,
+    ``"no_variation"`` or ``"too_few_df"``; for a continuous condition also ``"too_few_units"`` or
+    ``"design_not_full_rank"``; for survival also ``"no_deaths"``, ``"no_survivors"`` or ``"too_few_units"``; None when
+    it was), and its p-value is then NaN and not counted in the BH adjustment. A test (of any condition, and the
+    overall test) is not done when its Satterthwaite degrees of freedom are below 1 or not finite (``"too_few_df"``).
+
+    An adjustment that differs between a patient's images (the ``from`` type's share, or an image-level covariate)
+    can relate to the effect differently within a patient than between patients. Each such column therefore gets a
+    second column, its plain average over the patient's images: the conditions are compared at equal patient
+    averages, and the reported effect of the adjustment (``<column>_effect``) is its slope within patients. The
+    between-image variance is then estimated within patients from what the adjustments leave (``tau2_image``), and
+    the patient variance (``tau2``) from the patients' average effects and adjustments, each by Paule-Mandel. An
+    adjustment with one value per patient (for example age) gets no second column.
+
+    With more than two conditions, the pairs called by the overall test (``overall_p_adj`` at most ``alpha``) are
+    followed up: every two levels are compared, each by the two-condition test on the patients of those two levels,
+    Bonferroni-corrected within the pair at the Benjamini-Bogomolov level (``follow_up_results``; see
+    :meth:`SpicyResults.top_follow_ups`).
+
+    With a survival outcome, a null Cox model of the outcome on the ``covariates`` (an image-level covariate as its
+    average over the patient's images) gives each patient's martingale residual M, and the effect is regressed on M
+    (with the covariates and, with ``adjust_abundance=True``, the log share of the ``from`` type) by the same frailty
+    model, CR2 variance and Satterthwaite df: the score test (``p_value``). Patients with no outcome (or with a
+    covariate missing in all their images) are left out before anything else. A pair is tested when, among its
+    informative patients (an outcome and an image row for the pair), there is a death (else ``"no_deaths"``) and a
+    survivor (``"no_survivors"``), and at least q + 2 patients (``"too_few_units"``; q = 2, plus one per covariate
+    column, plus one per column that varies between a patient's images); ``n_deaths`` counts their deaths. The
+    hazard ratio (``hazard_ratio_sd``, per SD of the shrunken effect) comes from a Cox model with the covariates; its
+    standard error ``log_hr_se`` is model-based and approximate, so the score test's ``p_value`` is a pair's only
+    p-value. One radius.
 
     A patient's weight within its condition grows with the information of its images, so one or two patients can
     carry nearly all of a condition's weight. A radius where a condition's effective patients (Kish's
@@ -133,12 +162,19 @@ def spicy(
         patient.
     covariates
         Image- or patient-level columns to adjust for. The effect of each is reported as ``<column>_effect`` and
-        ``<column>_p_value`` (one column per level after the first for a categorical covariate).
+        ``<column>_p_value`` (one column per level after the first for a categorical covariate); for an image-level
+        one, its slope within patients (see above). With survival, they enter both the null Cox model and the model of
+        the effect.
     r
-        Radius, or several radii combined by ``combine`` ("maxT", up to 6 radii; "davies", Davies' bound for the
-        same maximum, for many radii; or "cauchy"). Default 50. The max-T p-value is the multivariate normal
-        probability of the largest absolute z, computed by the quasi-Monte Carlo method of Genz and Bretz with an
-        absolute error of about 1e-4 (by quadrature for two radii); the same inputs always give the same value.
+        Radius, or several radii combined by ``combine`` (two conditions only; a survival outcome takes one radius):
+        "maxT" (the default, any number of radii), "davies" (Davies' bound for the same maximum; faster, slightly
+        conservative) or "cauchy". Default 50. The max-T p-value is the multivariate normal probability that the
+        largest absolute z over the radii is at least the one observed, computed as a sum of first-exceedance terms
+        by the quasi-Monte Carlo method of Genz and Bretz to a relative error of about 0.1% (by quadrature for two
+        radii); the same inputs always give the same value. A radius whose correlation with a smaller kept radius
+        exceeds 0.995 is left out. ``cell_results`` then has ``maxT_converged``: True when the pair's p-value met the
+        error target. We recommend about 4 radii spanning the range of interest, none below about one cell diameter:
+        many closely spaced radii add little information, cost some power and are slower.
     from_, to
         Cell types to test (all ordered pairs by default).
     method
@@ -194,6 +230,9 @@ def spicy(
     self_variance_cells
         The number of cells sampled in each image for ``"sampled"`` or ``"geometricSampled"`` (every cell when an
         image has no more).
+    alpha
+        More than two conditions: the level of the gate for the follow-up comparisons (pairs whose ``overall_p_adj``
+        is at most ``alpha`` are followed up; see :meth:`SpicyResults.top_follow_ups`). Default 0.05.
     """
     if "from" in kwargs:
         from_ = kwargs.pop("from")
@@ -247,6 +286,14 @@ def spicy(
     if not np.isscalar(self_variance_cells) or not np.isfinite(self_variance_cells) or self_variance_cells < 1:
         raise ValueError("`self_variance_cells` must be a positive number of cells.")
     ctx.self_var = (self_variance, int(self_variance_cells))
+    if (
+        isinstance(alpha, bool)
+        or not isinstance(alpha, int | float | np.integer | np.floating)
+        or not np.isfinite(alpha)
+        or not 0 < alpha < 1
+    ):
+        raise ValueError("`alpha` must be a number between 0 and 1.")
+    ctx.alpha = float(alpha)
     types = ctx.type_labels
     if weighted:
         memb, types = _cell.membership(
@@ -280,12 +327,16 @@ def spicy(
         Z_extra = Z_extra - np.nanmean(Z_extra, axis=0)
 
     radii = [np.nan] if k is not None else sorted(set(np.atleast_1d(r).astype(float)))
-    if len(radii) > 1 and not is_surv and (ctx.continuous or len(ctx.levels) > 2):
+    if len(radii) > 1 and is_surv:
+        raise ValueError("a survival outcome is tested at one radius: give one `r`.")
+    if len(radii) > 1 and (ctx.continuous or len(ctx.levels) > 2):
         raise ValueError("several radii are supported for two conditions; give one `r`.")
-    if combine == "maxT" and len(radii) > 6 and not is_surv:
-        raise ValueError('combine="maxT" supports up to 6 radii; use combine="davies" for more.')
+    sv = None
+    if is_surv:
+        # the null Cox model; patients with no outcome are left out of every step (the side, tau2_image and the tests)
+        sv = _survival_setup(ctx, pheno, Z_extra)
+        ctx.image_group = np.where(sv["has_outcome"][ctx.image_unit], 0, -1)
     if weighted:
-        sv = _survival_setup(ctx, pheno, covariates) if is_surv else None
         res = _cell.cell_weighted(
             ctx,
             memb,
@@ -297,27 +348,15 @@ def spicy(
             adjust_abundance,
             Z_extra,
             extra_names,
-            (lambda c, rows, f, t: _survival_test(c, rows, f, t, sv, adjust_abundance, covariates))
-            if is_surv
-            else None,
+            (lambda c, rows, f, t: _survival_test(c, rows, f, t, sv, adjust_abundance, Z_extra)) if is_surv else None,
         )
         res["table"] = (
-            _survival_table(res["fits"], adjust_abundance, covariates)
+            _survival_table(res["fits"], adjust_abundance, Z_extra is not None)
             if is_surv
             else _cell.cell_table(res["fits"], ctx, adjust_abundance or Z_extra is not None)
         )
     elif is_surv:
-        res = _survival(
-            ctx,
-            pairs,
-            radii,
-            k,
-            pheno,
-            covariates,
-            cores,
-            adjust_abundance,
-            effect,
-        )
+        res = _survival(ctx, pairs, radii[0], k, sv, Z_extra, cores, adjust_abundance, effect)
     else:
         # several radii: one neighbour search at the largest radius gives every radius's graph
         graphs = (
@@ -341,6 +380,10 @@ def spicy(
             res = _pairs(ctx, graphs, pairs, variance, adjust_abundance, Z_extra, extra_names, radii, combine, cores)
     out = _results(res, ctx, pheno, condition, subject, is_surv, radii, k, effect)
     out.variance = None if is_surv else variance
+    if not is_surv and not ctx.continuous and len(ctx.levels) > 2:
+        # the gated follow-up comparisons of the pairs called by the overall test
+        out.follow_up_results = res.get("follow_ups")
+        out.alpha = ctx.alpha
     return out
 
 
@@ -369,7 +412,12 @@ def _levels(ctx, g, pairs, variance, adjust, Z_extra, extra_names):
     """More than two conditions or a continuous one (one radius): each pair's design in turn, then the table."""
     g.image_heterogeneity = True
     fits = [_cell.cell_pair_test(ctx, g, p[0], p[1], True, variance, adjust, Z_extra, extra_names) for p in pairs]
-    return {"table": _cell.cell_table(fits, ctx, adjust or Z_extra is not None), "fits": fits}
+    adjusted = adjust or Z_extra is not None
+    tab = _cell.cell_table(fits, ctx, adjusted)
+    out = {"table": tab, "fits": fits}
+    if tab is not None and not ctx.continuous:
+        out["follow_ups"] = _cell.cell_follow_ups(fits, tab, ctx, adjusted, ctx.alpha)
+    return out
 
 
 def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, combine, n_threads=1):
@@ -435,10 +483,15 @@ def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, co
     tab = long.iloc[np.where(none, keep, best) * P + np.arange(P)].copy()
     tab["p_value"] = x["comb_p"]
     tab["p_value_best_radius"] = x["comb_p_best"]
+    if combine == "maxT":
+        # whether its p-value met the integrator's error target (relative error about 1e-3; NaN when no radius was
+        # tested)
+        conv = np.asarray(x["comb_converged"])
+        tab["maxT_converged"] = np.array([bool(c) if c >= 0 else np.nan for c in conv], dtype=object)
     if adjusted:
         tab["unadjusted_p_value"] = x["comb_u_p"]
     if none.any():
-        num = [c for c in tab.columns if pd.api.types.is_numeric_dtype(tab[c])]
+        num = [c for c in tab.columns if pd.api.types.is_numeric_dtype(tab[c]) and c != "maxT_converged"]
         tab.loc[none, num] = np.nan
         if allocation:
             tab.loc[none, "side"] = None
@@ -542,65 +595,83 @@ def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names, enames=None
     return _cell.order_columns(tab)
 
 
-def _survival(
-    ctx,
-    pairs,
-    radii,
-    k,
-    pheno,
-    covariates,
-    cores,
-    adjust,
-    effect="allocation",
-):
-    """Survival: score test and the hazard ratio of the shrunken excess, per pair."""
-    sv = _survival_setup(ctx, pheno, covariates)
-    rr = radii[0]
+def _survival(ctx, pairs, r, k, sv, Z_extra, cores, adjust, effect="allocation"):
+    """Survival: score test and the hazard ratio of the shrunken excess, per pair, at one radius (or k)."""
     g = _cell.cell_graph(
         ctx,
         pairs,
-        r=None if np.isnan(rr) else rr,
+        r=None if np.isnan(r) else r,
         k=k,
         label_clustering=False,
         n_threads=cores,
         effect=effect,
     )
     g.image_heterogeneity = True
-    fits = [_survival_test(ctx, _cell.cell_rows(ctx, g, f, t), f, t, sv, adjust, covariates) for f, t in pairs]
-    return {"table": _survival_table(fits, adjust, covariates), "fits": fits}
+    fits = [_survival_test(ctx, _cell.cell_rows(ctx, g, f, t), f, t, sv, adjust, Z_extra) for f, t in pairs]
+    return {"table": _survival_table(fits, adjust, Z_extra is not None), "fits": fits}
 
 
-def _survival_setup(ctx, pheno, covariates):
-    """The null Cox model (covariates only) and its martingale residuals, one per patient."""
-    unit_first = np.array([int(np.argmax(ctx.image_unit == u)) for u in range(len(ctx.unit_labels))])
+def _survival_setup(ctx, pheno, Z_extra=None):
+    """The null Cox model and its martingale residuals, one per patient.
+
+    Its covariates W are the covariates' columns (Z_extra, images x columns, NaN where missing) averaged over each
+    patient's images: a patient-level covariate's value, and the patient's mean of an image-level one. The same W
+    enter the hazard ratio's Cox model. A patient with no outcome, or with a covariate missing in every image, has no
+    residual and takes no part in any test (has_outcome).
+    """
+    m = len(ctx.unit_labels)
+    unit_first = np.array([int(np.argmax(ctx.image_unit == u)) for u in range(m)])
     time = pheno[".time"].to_numpy(float)[unit_first]
     event = pheno[".event"].to_numpy(float)[unit_first]
-    if (pd.Series(pheno[".time"].to_numpy()).groupby(ctx.image_unit).nunique() > 1).any():
+    if (pd.Series(pheno[".time"].to_numpy()).groupby(ctx.image_unit).nunique() > 1).any() or (
+        pd.Series(pheno[".event"].to_numpy()).groupby(ctx.image_unit).nunique() > 1
+    ).any():
         raise ValueError("the survival outcome must be constant within each subject.")
-    W = (
-        np.zeros((len(time), 0))
-        if covariates is None
-        else _model_matrix(pheno.iloc[unit_first].reset_index(drop=True), covariates)[0]
-    )
+    if Z_extra is None:
+        W = np.zeros((m, 0))
+    else:
+        W = pd.DataFrame(Z_extra).groupby(ctx.image_unit).mean().reindex(range(m)).to_numpy(float)
     ok_u = np.isfinite(time) & np.isfinite(event) & np.all(np.isfinite(W), axis=1)
-    null = _core.cox_fit(time[ok_u], event[ok_u].astype(np.int32), W[ok_u].ravel(), W.shape[1])
+    if not ok_u.any():
+        raise ValueError("no patient has a survival outcome (and every covariate).")
+    Wok = np.ascontiguousarray(W[ok_u])
+    null = _core.cox_fit(time[ok_u], event[ok_u].astype(np.int32), Wok.ravel(), W.shape[1])
     if not null["ok"]:
         raise RuntimeError("the null Cox model did not converge.")
-    M = np.full(len(time), np.nan)
+    M = np.full(m, np.nan)
     M[ok_u] = null["martingale"]
+    W[~ok_u] = np.nan
     ev = np.where(np.isfinite(event), event, 0).astype(np.int32)
-    return {"M": M, "time": time, "event": ev}
+    return {"M": M, "time": time, "event": ev, "W": W, "has_outcome": ok_u}
 
 
-def _survival_test(ctx, rows, f, t, sv, adjust, covariates):
-    """The survival test of one pair on given image rows."""
+def _survival_test(ctx, rows, f, t, sv, adjust, Z_extra=None):
+    """The survival test of one pair on given image rows.
+
+    The score test on (1, M_i, the abundance share, the covariates) and the hazard ratio (the core's survival_test),
+    and the same without the abundance share (unadjusted_*). Rows of patients with no outcome are left out (spicy()
+    leaves them out before the side and the image random effect).
+    """
     m = len(ctx.unit_labels)
-    u = _core.survival_test(rows, rows["unit"], m, sv["M"], sv["time"], sv["event"], np.zeros(0))
+    keep = sv["has_outcome"][rows["unit"]]
+    if not keep.all():
+        rows = _cell._subset_rows(rows, keep)
+    n = len(rows["img"])
+    ze = np.zeros((n, 0)) if Z_extra is None else Z_extra[rows["img"], :]
+    W = sv["W"]
+
+    def test(X):
+        X = np.ascontiguousarray(X, dtype=float)
+        return _core.survival_test(
+            rows, rows["unit"], m, sv["M"], sv["time"], sv["event"], X.ravel(), X.shape[1], W.ravel(), W.shape[1]
+        )
+
+    u = test(ze)
     x = _cell._share(ctx, rows, f) if adjust else np.zeros(0)
     # the adjusted test only where the unadjusted one was done (not where the excess has no variation: no_variation)
     shared = not (u["ok"] and len(x) > 1 and np.var(x, ddof=1) > 0)
-    s = u if shared else _core.survival_test(rows, rows["unit"], m, sv["M"], sv["time"], sv["event"], x)
-    parts = ([] if shared else ["abundance"]) + ([] if covariates is None else ["covariates"])
+    s = u if shared else test(np.column_stack([x, ze]))
+    parts = ([] if shared else ["abundance"]) + ([] if Z_extra is None else ["covariates"])
     return {
         "from": f,
         "to": t,
@@ -610,45 +681,51 @@ def _survival_test(ctx, rows, f, t, sv, adjust, covariates):
         "surv": s,
         "unadjusted_surv": u,
         "adjusted_for": "+".join(parts) or "none",
+        # with a covariate that varies within patients the core fits the adjusted design: its image variance (B2) is
+        # the test's tau2_image, as for the condition tests
+        "tau2_image": s["omega2"] if np.isfinite(s["omega2"]) else None,
     }
 
 
-def _survival_table(fits, adjust, covariates):
+def _survival_table(fits, adjust, has_covariates):
+    """One row per pair, tested or not (not_tested: why not, None when it was; a pair not tested has NaN results)."""
     rows = []
     for o in fits:
-        s, u = o["surv"], o["unadjusted_surv"]
-        if not s["ok"]:
-            continue
-        rows.append(
-            _cell.add_side(
-                {
-                    "from": o["from"],
-                    "to": o["to"],
-                    "score_coefficient": s["score_coef"],
-                    "score_se": s["score_se"],
-                    "score_df": s["score_df"],
-                    "p_value": s["score_p"],
-                    "hazard_ratio_sd": s["hr_sd"],
-                    "log_hr_sd": s["log_hr_sd"],
-                    "log_hr_se": s["hr_se"],
-                    "hr_p_value": s["hr_p"],
-                    "log_hr_per_unit": s["log_hr_unit"],
-                    "tau2": s["tau2"],
-                    "adjusted_for": o["adjusted_for"],
-                    "unadjusted_p_value": u["score_p"] if u["ok"] else np.nan,
-                    "unadjusted_hazard_ratio_sd": u["hr_sd"] if u["ok"] else np.nan,
-                },
-                o,
-            )
-        )
+        s, u, ok = o["surv"], o["unadjusted_surv"], bool(o["ok"])
+
+        def v(z, ok=ok):
+            return z if ok else np.nan
+
+        row = {
+            "from": o["from"],
+            "to": o["to"],
+            "score_coefficient": v(s["score_coef"]),
+            "score_se": v(s["score_se"]),
+            "score_df": v(s["score_df"]),
+            "p_value": v(s["score_p"]),
+            "hazard_ratio_sd": v(s["hr_sd"]),
+            "log_hr_sd": v(s["log_hr_sd"]),
+            "log_hr_se": v(s["hr_se"]),
+            "log_hr_per_unit": v(s["log_hr_unit"]),
+            "tau2": v(s["tau2"]),
+            "n_deaths": int(s["n_deaths"]),
+            "not_tested": None if ok else (o["reason"] or "not_tested"),
+            "adjusted_for": o["adjusted_for"],
+            "unadjusted_p_value": v(u["score_p"]),
+            "unadjusted_hazard_ratio_sd": v(u["hr_sd"]),
+        }
+        _cell.add_side(row, o)
+        if not ok and "side" in row:
+            row["side"] = None
+        rows.append(row)
     tab = pd.DataFrame(rows) if rows else None
     if tab is not None:
         tab["p_adj"] = _cell.p_adjust_bh(tab["p_value"])
         tab["unadjusted_p_adj"] = _cell.p_adjust_bh(tab["unadjusted_p_value"])
-        # the unadjusted columns are the test without the abundance adjustment (covariates enter both null Cox models)
+        # the unadjusted columns are the test without the abundance adjustment (covariates are on both sides of both)
         if not adjust:
             tab = tab.drop(columns=[c for c in tab.columns if c.startswith("unadjusted_")])
-        if not adjust and covariates is None:
+        if not adjust and not has_covariates:
             tab = tab.drop(columns=["adjusted_for"])
         tab.index = tab["from"] + "__" + tab["to"]
     return tab

@@ -86,6 +86,11 @@ class SpicyResults:
     reference, with the HTZ small-sample F of Tipton and Pustejovsky). With a continuous condition (``continuous``),
     one row per pair: the effect at the condition's mean (``excess_mean``) and its slope per unit of the condition
     (``excess_slope``), with its CR2 standard error and Satterthwaite df; ``condition`` holds each image's value.
+    ``follow_up_results`` (more than two conditions) holds the follow-up comparisons of two levels for the pairs
+    called by the overall test at level ``alpha`` (see :meth:`top_follow_ups`). With several radii and
+    ``combine="maxT"``, ``maxT_converged`` says whether a pair's max-T p-value met its error target (about 0.1%).
+    For survival, ``log_hr_se`` is model-based and approximate, ``n_deaths`` counts the deaths among the informative
+    patients, and every requested pair has a row, with ``not_tested`` giving why a pair was not tested.
     """
 
     cell_results: pd.DataFrame
@@ -103,6 +108,8 @@ class SpicyResults:
     effect: str = "allocation"
     variance: str | None = None
     continuous: bool = False
+    follow_up_results: pd.DataFrame | None = None
+    alpha: float | None = None
 
     # --- spicyR-style matrices -----------------------------------------------------------------------
     def _wide(self, col):
@@ -205,6 +212,66 @@ class SpicyResults:
                 if tab[c].dtype.kind == "f":
                     tab[c] = _signif(tab[c].to_numpy(), figures)
         return tab
+
+    def top_follow_ups(
+        self,
+        n: int | None = None,
+        from_=None,
+        to=None,
+        significant: bool = False,
+        figures: int | None = None,
+        **kwargs,
+    ) -> pd.DataFrame:
+        """The follow-up comparisons of two levels, for more than two conditions, as spicyR's ``topFollowUps()``.
+
+        With more than two conditions, each pair is first tested by the overall test (are all the levels equal?).
+        The pairs it calls, by BH at level ``alpha`` (the argument of :func:`spicyr.spicy`, 0.05 by default), are
+        followed up: every two levels are compared, each by the two-condition test on the patients of those two
+        levels only, with their own between-image and between-patient variances, the same rules for not testing and
+        the same adjustments; the pair's ``side`` stays the one chosen from every image. Within a pair the
+        comparisons are Bonferroni-corrected at the Benjamini-Bogomolov level alpha R / m (R the pairs called, m the
+        pairs with an overall test): a comparison is ``significant`` when ``p_value <= p_threshold``,
+        ``p_threshold = alpha R / (m K)`` with K the comparisons tested in the pair (``n_comparisons``).
+
+        One row per called pair and comparison (``level_ref`` is the reference of the comparison, ``level_comp``
+        the other level): ``excess_ref``, ``excess_comp``, ``excess_difference``, ``se``, ``df``, ``p_value``,
+        ``p_threshold``, ``significant``, the pair's ``overall_p_value`` and ``overall_p_adj``, ``n_comparisons``,
+        ``tau2`` and ``not_tested``; ``side`` and ``tau2_image`` for the allocation effect; with adjustment,
+        ``adjusted_for`` and the unadjusted difference and p-value. Sorted by the overall p-value, then the
+        comparison's p-value.
+
+        Parameters
+        ----------
+        n
+            The number of rows to list (all by default).
+        from_, to
+            Only the pairs with these ``from`` and ``to`` cell types (``from`` also works as a keyword).
+        significant
+            Only the significant comparisons.
+        figures
+            Round to ``figures`` significant figures, as R's ``signif()``.
+        """
+        from_ = _from_alias(from_, kwargs)
+        if self.method != "cell" or "overall_p_value" not in self.cell_results.columns:
+            raise ValueError("follow-up comparisons are made by spicy() (cell method) with more than two conditions.")
+        fu = self.follow_up_results
+        if fu is None:
+            raise ValueError("these results have no follow-up comparisons.")
+        if from_ is not None:
+            fu = fu[fu["from"].isin([from_] if isinstance(from_, str) else list(from_))]
+        if to is not None:
+            fu = fu[fu["to"].isin([to] if isinstance(to, str) else list(to))]
+        if significant:
+            fu = fu[fu["significant"].eq(True).to_numpy()]
+        fu = fu.sort_values(["overall_p_value", "p_value"], kind="stable", na_position="last")
+        if n is not None:
+            fu = fu.head(n)
+        fu = fu.copy()
+        if figures is not None:
+            for c in fu.columns:
+                if fu[c].dtype.kind == "f":
+                    fu[c] = _signif(fu[c].to_numpy(), figures)
+        return fu
 
     def bind(self, pair: str | None = None, from_=None, to=None, parent=None, **kwargs) -> pd.DataFrame:
         """The per-image values of every pair, or of one pair, as spicyR's ``bind()``.
@@ -643,7 +710,12 @@ class SpicyResults:
             novar = int((t["adjusted_for"] == "none (no_variation)").sum())
             noinfo = int((t["adjusted_for"] == "none (no_information)").sum())
             few = int((t["adjusted_for"] == "none (few_effective_units)").sum())
-            fallback = int(t["adjusted_for"].str.startswith("none (").sum()) - novar - noinfo - few
+            tdf = int((t["adjusted_for"] == "none (too_few_df)").sum())
+            fallback = (
+                0
+                if self.survival
+                else int(t["adjusted_for"].str.startswith("none (").sum()) - novar - noinfo - few - tdf
+            )
             if fallback:
                 lines.append(f"{fallback} pairs could not be adjusted and are reported unadjusted (see adjusted_for)")
             if novar:
@@ -658,13 +730,25 @@ class SpicyResults:
                     f"{few} pairs have a condition with too few effective patients "
                     '(adjusted_for "none (few_effective_units)") and are not tested'
                 )
-        elif not self.survival:
-            untested = int(t["p_value"].isna().sum())
-            if untested:
+            if tdf:
                 lines.append(
-                    f"{untested} pairs are not tested (p_value NaN: no variation, a condition with no informative "
-                    "patient, or one with too few effective patients)"
+                    f'{tdf} pairs have fewer than 1 degree of freedom (adjusted_for "none (too_few_df)") and are not '
+                    "tested"
                 )
+        untested = (
+            int(t["not_tested"].notna().sum())
+            if self.survival
+            else int(t["p_value"].isna().sum())
+            if "adjusted_for" not in t.columns
+            else 0
+        )
+        if untested and self.survival:
+            lines.append(f"{untested} pairs are not tested (p_value NaN; see not_tested)")
+        elif untested:
+            lines.append(
+                f"{untested} pairs are not tested (p_value NaN: no variation, a condition with no informative "
+                "patient, one with too few effective patients, or too few degrees of freedom)"
+            )
         sig = f"BH-adjusted p < 0.05: {int((t['p_adj'] < 0.05).sum())} pairs"
         if "unadjusted_p_adj" in t.columns:
             sig += f" ({int((t['unadjusted_p_adj'] < 0.05).sum())} without adjustment)"
@@ -673,6 +757,13 @@ class SpicyResults:
             sig += (
                 "\nOverall test (every level against the reference), BH-adjusted p < 0.05: "
                 f"{int((t.loc[first, 'overall_p_adj'] < 0.05).sum())} pairs"
+            )
+        fu = self.follow_up_results
+        if fu is not None and len(fu):
+            sig += (
+                f"\nFollow-up comparisons of the {len((fu['from'] + '__' + fu['to']).unique())} pairs called at "
+                f"alpha = {self.alpha:g}: {int(fu['significant'].eq(True).sum())} of {int(fu['p_value'].notna().sum())} "
+                "significant at the Benjamini-Bogomolov level. See top_follow_ups()."
             )
         lines += [sig, "See top_pairs()."]
         return "\n".join(lines)
