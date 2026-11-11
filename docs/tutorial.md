@@ -341,7 +341,7 @@ Restricting `from_` and `to` does not change the results for the pairs that are 
 
 ## Which radius?
 
-The radius decides which relationship is tested: a radius of one or two cell diameters asks whether two cell types
+The radius decides which relationship is tested. A radius of one or two cell diameters asks whether two cell types
 touch, a larger one whether they share a neighbourhood. When you know the relationship you are looking for, choose
 the radius for it and test that one radius. When the scale is unknown, give several radii and spicyr tests them
 together by the largest of their test statistics, accounting for the strong correlation between neighbouring radii.
