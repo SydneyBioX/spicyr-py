@@ -161,5 +161,79 @@
     "r": 30,
     "from": ["tumour", "T"],
     "to": ["T", "B"]
+  },
+  "follow_ups": {
+    "condition": "grp3",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T", "macro"],
+    "to": ["T", "B"]
+  },
+  "follow_ups_adjusted": {
+    "condition": "grp3",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T"],
+    "to": ["T", "B"],
+    "adjustAbundance": true,
+    "covariates": "batch",
+    "alpha": 0.2
+  },
+  "follow_ups_count": {
+    "condition": "grp3",
+    "subject": "patient",
+    "r": 30,
+    "from": "tumour",
+    "to": ["T", "B", "macro"],
+    "effect": "count",
+    "ref": "B"
+  },
+  "radii_maxT_many": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": [5, 10, 15, 20, 25, 30, 35, 40],
+    "from": "tumour",
+    "to": ["T", "B"]
+  },
+  "radii_maxT_adjusted": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": [10, 20, 30, 40],
+    "from": ["tumour", "T"],
+    "to": ["T", "B"],
+    "adjustAbundance": true,
+    "covariates": "batch"
+  },
+  "image_covariate": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "covariates": "img_cells",
+    "from": ["tumour", "macro"]
+  },
+  "survival_adjusted": {
+    "condition": "os",
+    "subject": "patient",
+    "r": 30,
+    "from": ["tumour", "T"],
+    "to": ["T", "B"],
+    "covariates": ["age", "img_cells"],
+    "adjustAbundance": true
+  },
+  "survival_no_outcome": {
+    "condition": "os_na",
+    "subject": "patient",
+    "r": 30,
+    "from": "tumour",
+    "to": ["T", "B", "macro"],
+    "adjustAbundance": true
+  },
+  "survival_few": {
+    "condition": "os_few",
+    "subject": "patient",
+    "r": 30,
+    "from": "tumour",
+    "to": ["T", "B"],
+    "adjustAbundance": true
   }
 }

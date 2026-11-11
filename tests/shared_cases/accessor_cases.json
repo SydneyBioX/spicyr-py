@@ -38,6 +38,14 @@
       "r": [10, 20, 40],
       "from": ["tumour", "T"],
       "to": ["T", "B"]
+    },
+    "follow_ups": {
+      "condition": "grp3",
+      "subject": "patient",
+      "r": 30,
+      "from": ["tumour", "T", "macro"],
+      "to": ["T", "B"],
+      "alpha": 0.2
     }
   },
   "cases": {
@@ -150,6 +158,27 @@
       "args": {
         "from": "tumour",
         "to": "T"
+      }
+    },
+    "follow_default": {
+      "fit": "follow_ups",
+      "call": "topFollowUps",
+      "args": []
+    },
+    "follow_significant": {
+      "fit": "follow_ups",
+      "call": "topFollowUps",
+      "args": {
+        "significant": true
+      }
+    },
+    "follow_from_n": {
+      "fit": "follow_ups",
+      "call": "topFollowUps",
+      "args": {
+        "from": "tumour",
+        "n": 2,
+        "figures": 3
       }
     }
   }

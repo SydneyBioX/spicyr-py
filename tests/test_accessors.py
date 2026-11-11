@@ -37,7 +37,8 @@ def test_accessor_matches_r(name):
     case = SPEC["cases"][name]
     res = fit(case["fit"])
     args = {R_TO_PY.get(k, k): v for k, v in (case["args"] or {}).items()}  # an empty R list is []
-    got = res.top_pairs(**args) if case["call"] == "topPairs" else res.bind(**args)
+    call = {"topPairs": res.top_pairs, "bind": res.bind, "topFollowUps": res.top_follow_ups}[case["call"]]
+    got = call(**args)
     exp = pd.read_csv(HERE / f"accessor_{name}.csv", index_col=0, keep_default_na=False, na_values=["NA"])
     assert list(got.columns) == list(exp.columns)
     assert list(got.index.astype(str)) == list(exp.index.astype(str))
@@ -165,3 +166,18 @@ def test_printed_summary():
         fit("three_levels")
     )
     assert "Units: 14 patients with 28 images" in repr(fit("survival"))
+
+
+def test_follow_ups_summary_and_errors():
+    """The printed count of follow-up comparisons (as spicyR's print()); top_follow_ups() needs more than two levels."""
+    res = fit("follow_ups")
+    assert (
+        "Follow-up comparisons of the 2 pairs called at alpha = 0.2: 2 of 6 significant at the "
+        "Benjamini-Bogomolov level. See top_follow_ups()." in repr(res)
+    )
+    fu = res.top_follow_ups()
+    assert fu["overall_p_value"].is_monotonic_increasing and (fu["n_comparisons"] == 3).all()
+    assert (res.top_follow_ups(significant=True)["significant"]).all()
+    assert (res.top_follow_ups(**{"from": "T"})["from"] == "T").all()
+    with pytest.raises(ValueError, match="more than two conditions"):
+        fit("two_groups").top_follow_ups()

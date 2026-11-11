@@ -128,7 +128,9 @@ def test_levels_and_survival_not_tested(r):
     rng = np.random.default_rng(2)
     cells["time"] = cells["imageID"].map(dict(zip(img, rng.exponential(1, len(img)), strict=True)))
     cells["event"] = cells["imageID"].map(dict(zip(img, (rng.random(len(img)) < 0.7).astype(int), strict=True)))
-    with pytest.raises(ValueError, match="no pair could be tested"):
-        spicyr.spicy(cells, condition="time", survival="event", r=r, from_="tumour", to="T", adjust_abundance=True)
+    # survival keeps every pair, with why it was not tested (as spicyR 1.99.57)
+    s = spicyr.spicy(cells, condition="time", survival="event", r=r, from_="tumour", to="T", adjust_abundance=True)
+    s = s.cell_results
+    assert s["p_value"].isna().all() and (s["not_tested"] == "no_variation").all()
     # at r = 4 the pair varies and is tested
     assert len(spicyr.spicy(cells, condition="c3", r=4.0, from_="tumour", to="T", adjust_abundance=True).cell_results)

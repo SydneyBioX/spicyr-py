@@ -1,7 +1,7 @@
 ## Shared test cases for the accessors of the results: spicyR (R) writes what topPairs() and bind() return on the
 ## cells of make_cases.R; tests/test_accessors.py must give the same tables with top_pairs() and bind(). Rerun after
 ## any change to either front end's accessors:
-##   Rscript tests/shared_cases/make_accessor_cases.R      (needs spicyR >= 1.99.55)
+##   Rscript tests/shared_cases/make_accessor_cases.R      (needs spicyR >= 1.99.57)
 suppressPackageStartupMessages(library(spicyR))
 out_dir <- file.path("tests", "shared_cases")
 cells <- utils::read.csv(file.path(out_dir, "cells.csv"))
@@ -15,7 +15,9 @@ fits <- list(
   continuous = list(condition = "age", subject = "patient", r = 30, from = c("tumour", "T")),
   survival = list(condition = "os", subject = "patient", r = 30, covariates = "age", from = c("tumour", "T")),
   radii = list(condition = "condition", subject = "patient", r = c(10, 20, 40), from = c("tumour", "T"),
-               to = c("T", "B"))
+               to = c("T", "B")),
+  follow_ups = list(condition = "grp3", subject = "patient", r = 30, from = c("tumour", "T", "macro"), to = c("T", "B"),
+                    alpha = 0.2)
 )
 # each case: a fit, and the topPairs() or bind() arguments
 cases <- list(
@@ -33,7 +35,10 @@ cases <- list(
   bind_pair = list(fit = "two_groups", call = "bind", args = list(from = "tumour", to = "T")),
   bind_pair_no_subject = list(fit = "three_levels", call = "bind", args = list(from = "tumour", to = "macro")),
   top_continuous = list(fit = "continuous", call = "topPairs", args = list(n = NULL)),
-  bind_continuous = list(fit = "continuous", call = "bind", args = list(from = "tumour", to = "T"))
+  bind_continuous = list(fit = "continuous", call = "bind", args = list(from = "tumour", to = "T")),
+  follow_default = list(fit = "follow_ups", call = "topFollowUps", args = list()),
+  follow_significant = list(fit = "follow_ups", call = "topFollowUps", args = list(significant = TRUE)),
+  follow_from_n = list(fit = "follow_ups", call = "topFollowUps", args = list(from = "tumour", n = 2, figures = 3))
 )
 res <- lapply(fits, function(a) suppressMessages(do.call(spicy, c(list(cells = cells), a))))
 for (nm in names(cases)) {
