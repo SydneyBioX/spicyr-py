@@ -1,5 +1,42 @@
 # spicyr news
 
+## 1.99.40
+
+- Adjusted tests (covariates, `adjust_abundance=True`) when an adjustment varies between a patient's images (the
+  `from` type's share, an image-level covariate): each such column gets a second column, its plain average over the
+  patient's images, so the conditions are compared at equal patient averages and the adjustment's effect
+  (`<column>_effect`, `abundance_effect`) is its slope within patients. The between-image variance (`tau2_image`) is
+  re-estimated within patients after the adjustments, and the patient variance (`tau2`) by Paule-Mandel on the
+  patients' average effects and adjustments. Up to 1.99.39 these were the unadjusted values. Adjustments with one
+  value per patient, and unadjusted tests, give the same results as before. Applies to two or more conditions, a
+  continuous condition, every radius, `cell_weights` and survival.
+- More than two conditions: gated follow-up comparisons. For the pairs called by BH on the overall test
+  (`overall_p_adj` at most the new `spicy()` argument `alpha`, default 0.05), every two levels are compared, each by
+  the two-condition test on the patients of those two levels only, Bonferroni-corrected within the pair at the
+  Benjamini-Bogomolov level. They are in the new `follow_up_results` (one row per called pair and comparison:
+  `level_ref`, `level_comp`, `excess_ref`, `excess_comp`, `excess_difference`, `se`, `df`, `p_value`, `p_threshold`,
+  `significant`, `overall_p_value`, `overall_p_adj`, `n_comparisons`, `tau2`, `not_tested`; `side` and `tau2_image`
+  for the allocation effect; `adjusted_for` and the unadjusted difference and p-value with adjustment) and from the
+  new `top_follow_ups()`; the printed results count them.
+- `combine="maxT"` (the default for several radii) takes any number of radii (it stopped at 6) and its p-value has a
+  relative error of about 0.1% at every size of p, instead of an absolute error of 1e-4. The new column
+  `maxT_converged` says whether a pair's p-value met that target. The documentation recommends about 4 radii.
+- Survival outcomes: patients with no outcome (or with a covariate missing in all their images) are left out before
+  anything else, including the pair's side and the between-image variance. Covariates are in both the null Cox model
+  (an image-level covariate as the patient's average) and the model of the effect, and the hazard ratio is adjusted
+  for them. A survival outcome takes one radius: several radii are now an error. `hr_p_value` is removed (the score
+  test's `p_value` is the pair's only p-value); `log_hr_se` stays, model-based and approximate. A pair is tested when
+  its informative patients include a death (`not_tested = "no_deaths"`) and a survivor (`"no_survivors"`) and number
+  at least q + 2 (`"too_few_units"`). New column `n_deaths`. Every requested pair now has a row, with `not_tested`.
+- Every test (two conditions, more than two and their follow-ups, continuous, survival, and the overall test) is not
+  done when its Satterthwaite df are below 1 or not finite: `not_tested = "too_few_df"`, p-value NaN, left out of BH
+  and of the combination over radii (with adjustment, `adjusted_for = "none (too_few_df)"`).
+- The Paule-Mandel estimates no longer cap their search bracket (results of `spicy()` are unchanged).
+- Core synced from spicyR 1.99.57 (`adjusted_design`, `max_abs_tail`, the survival test with covariates on both
+  sides, bound as `_core.adjusted_design`, `_core.max_abs_tail` and `_core.survival_test`); shared cases regenerated
+  with spicyR 1.99.57, with follow-up, max-T, adjusted-design and survival cases added. spicyR's Kontextual changes
+  have no counterpart here (spicyr has no Kontextual engine).
+
 ## 1.99.39
 
 - The overall test of more than two conditions is faster: core synced from spicyR 1.99.56, which sums the variance
