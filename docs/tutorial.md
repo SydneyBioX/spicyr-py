@@ -342,10 +342,10 @@ Restricting `from_` and `to` does not change the results for the pairs that are 
 ## Which radius?
 
 The scale of an interaction is rarely known in advance. Give several radii and spicyr tests them together, using a
-max-T test that accounts for the strong correlation between neighbouring radii. The exact max-T handles up to six
-radii; for a finer grid, such as every 2 µm up to 50 µm, `combine="davies"` uses Davies' bound for the maximum over a
-smooth range of radii, which stays close to the exact max-T when neighbouring radii are highly correlated.
-`combine="cauchy"` is another alternative.
+max-T test that accounts for the strong correlation between neighbouring radii. The max-T takes any number of radii,
+but about 4 radii spanning the range of interest, none below about one cell diameter, are best: many closely spaced
+radii add little information, cost some power and are slower. `combine="davies"` uses Davies' bound for the maximum
+over a smooth range of radii (faster, slightly conservative), and `combine="cauchy"` is another alternative.
 
 ```{code-cell} ipython3
 res_r = spicyr.spicy(adata, condition="ER.Status", subject="metabricId", r=[10, 25, 50, 75])
