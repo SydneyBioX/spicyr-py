@@ -7,6 +7,8 @@
 // Written with AI assistance (Claude, Anthropic), directed by the authors; see NEWS.
 #pragma once
 
+#include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -80,9 +82,16 @@ std::vector<double> label_clustering_factor(const Dataset& data, const std::vect
                                             bool allocation = false);
 
 // The Kontextual excess (Dataset::kontextual_sums, 7 values per image), on Statial's scale (O, L times
-// n_context / n_to, Q times its square): image rows O, E = p L,
-// v = p (1 - p) M / (M - 1) (Q - L^2 / M) psi, n = D (the REF cells' context exposure), p = n_to / M
-// (self-pair: (n_to - 1) / (M - 1)). Images without TARGET cells, exposure or variance give no row.
+// f = n_context / n_to, Q times its square): image rows O, E = p L,
+// v = p (1 - p) M / (M - 1) (Q - L^2 / M) psi, n = D (the REF cells' context exposure), p = n_to / M.
+// A self triple (from == to; p = (n_to - 1) / (M - 1)): O is quadratic in the labels, and v = f^2 Var(O - p L) psi is
+// the exact variance under random labelling of TARGET among the M candidates, from the fixed sums of
+// Dataset::kontextual_self_sums() (self_sums, 5 values per image; empty for other triples):
+// Var = E O^2 - 2 p E[O L] + p^2 E L^2, with pi_k = n^(k) / M^(k) (falling factorials),
+// E O^2 = pi2 U2 + pi3 (A2 - 2 U2) + pi4 (U^2 + U2 - A2) (pairs of links sharing two, one, no cells),
+// E[O L] = pi3 U^2 + (pi2 - pi3) C2, E L^2 = pi1 B2 + pi2 (U^2 - B2); values below 0 (rounding) are 0, and an image
+// with v <= 1e-10 (f U)^2 (every relabelling gives the same O - p L) gives no row (DECISIONS 7-8 Nov 2026).
+// D is Kontextual's normaliser, unchanged. Images without TARGET cells, exposure or variance give no row.
 // The image rows of spicy's excess with soft membership, for TARGET label `to`, from Dataset::weighted_excess_sums
 // (sums: images x (3 + 4 n_labels), image-major): O, E = (sum b / M) L, the variance of O when the TARGET weights
 // are shuffled over the candidates, and n = sum b over the candidates (count), or for the allocation the TARGET
@@ -97,7 +106,11 @@ ImageRows weighted_image_rows(const double* sums, int n_images, int n_labels, in
 ImageRows kontextual_image_rows_weighted(const std::vector<double>& sums, int n_images);
 
 ImageRows kontextual_image_rows(const std::vector<double>& sums, const std::vector<double>& counts, int n_types,
-                                int n_images, int from, int to, const std::vector<double>& psi);
+                                int n_images, int from, int to, const std::vector<double>& psi,
+                                const std::vector<double>& self_sums);
+// The exact null variance of O - p L for a self triple, unscaled (kontextual_image_rows): ss the image's 5 values of
+// Dataset::kontextual_self_sums(), M candidates, n TARGET cells among them.
+double kontextual_self_variance(const double* ss, double M, double n);
 
 // Label-clustering factor of the Kontextual excess: as label_clustering_factor, with the HAC of the
 // Kontextual scores over the context candidates (Dataset::hac_phi_sums design 0; build_context first) and
@@ -155,6 +168,12 @@ inline bool few_effective_units(const std::vector<double>& n_eff, const std::vec
 //     below min(kMinEffectiveUnits, m_g / 2), m_g its number of units with rows at the radius, is not tested.
 struct TestRules { bool pooled_dispersion = false, min_effective_units = false; };
 TestRules test_rules(bool allocation);
+
+// Every test (two conditions, more conditions, a continuous condition, survival) is not done when its Satterthwaite
+// df are below kMinDf or not finite ("too_few_df"): the df of a nearly saturated design are unreliable, and with
+// df = Inf a test with few events rejected far above its level (DECISIONS 7 Nov 2026).
+constexpr double kMinDf = 1;
+inline bool too_few_df(double df) { return !(std::isfinite(df) && df >= kMinDf); }
 
 // ------------------------------------------------------ the two-group test ---
 
@@ -224,6 +243,36 @@ struct JointResult {
 JointResult design_joint_test(const ImageRows& rows, const std::vector<int>& unit, const std::vector<double>& Z, int q,
                               const std::vector<double>& contrasts, int k, double tau2, bool hartung_knapp = false);
 
+// An adjusted design whose added columns (after the q0 condition columns) include one that varies between a unit's
+// images: its variance components and patient-mean columns (spicyR extension A/B; DECISIONS 4 Nov 2026 17:10 and
+// 6 Nov 14:37). `rows` are the rows BEFORE the image random effect (y = (O - E) / n, s2 = v / n^2), the design's rows
+// only (a missing condition or covariate already left out); Z is row-major with q columns. Then:
+//   - omega2 (B2; with image_heterogeneity, else 0): Paule-Mandel within units after the image-level columns. Over
+//     the units with two or more rows, Q_w(t) = min over (alpha_u, beta) of sum (y - alpha_u - x' beta)^2 / (s2 + t),
+//     the unit intercepts free and beta for the image-level columns only; target sum_u (J_u - 1) - q_w, q_w the rank
+//     of the within-unit design; 0 when Q_w(0) <= target or target < 1. Q_w falls in t: one root.
+//   - the rows become y with variance s2 + omega2 (O = y, E = 0, n = 1), as image_heterogeneity_rows makes them.
+//   - Mundlak: every image-level column gets a second column, its unweighted mean over the unit's rows, so that its
+//     own coefficient is the within-unit slope and the conditions are compared at equal patient means. Columns
+//     constant within every unit get none.
+//   - tau2 (option iv; with frailty, else 0): Paule-Mandel on the unit summaries, Q_b(t) = min over theta of
+//     sum_u w_u (ybar_u - zbar_u' theta)^2, w_u = G_u / (1 + t G_u), G_u = sum 1 / v, and ybar_u, zbar_u the unit's
+//     1 / v-weighted means of y and of every column (the mean columns included); target m - rank(zbar); 0 when
+//     Q_b(0) <= target or the target is below 1.
+// The test is then design_tests on these rows and columns at this tau2. image_level = false (every added column is
+// constant within units): nothing is computed; the design is the patient-level one (design_tests with tau2 < 0, its
+// own exact Paule-Mandel) on the rows as they were.
+struct AdjustedDesign {
+  bool image_level = false;
+  ImageRows rows;                    // y, E = 0, n = 1, v = s2 + omega2
+  std::vector<double> Z;             // row-major, q columns: the input's, then one mean column per image-level column
+  int q = 0;
+  std::vector<int> mean_of;          // per mean column: the column of the input it averages (0-based)
+  double omega2 = 0, tau2 = 0;
+};
+AdjustedDesign adjusted_design(const ImageRows& rows, const std::vector<int>& unit, const std::vector<double>& Z, int q,
+                               int q0, bool image_heterogeneity, bool frailty);
+
 // Option 2 (Supplementary Methods, Section 2): the two-group test with a slope on the centred covariate x
 // (the log share of the REF type), tau2 held at the unadjusted value. Rows with a negative group are left out.
 DesignResult availability_test(const ImageRows& rows, const std::vector<int>& unit, const std::vector<int>& group,
@@ -243,22 +292,35 @@ struct CoxResult {
 CoxResult cox_fit(const std::vector<double>& time, const std::vector<int>& event, const std::vector<double>& X,
                   int p);
 
-// Survival (Supplementary Methods, Section 3) for one pair. time and event per unit (unit-code order);
-// covariates (row-major, per unit) enter the null Cox model.
+// Survival (Supplementary Methods, Section 3) for one pair. martingale, time and event per unit (unit-code order); a
+// unit with no outcome has a martingale residual that is not finite, and its rows are left out (the caller leaves them
+// out before the side and the image random effect, so the result is that of the data without them).
 struct SurvivalResult {
   bool ok = false;
   std::string reason;
-  double score_coef = 0, score_se = 0, score_df = 0, score_p = 1;  // theta_1 of delta ~ 1 + M
-  double log_hr_sd = 0, hr_sd = 1, hr_se = 0, hr_p = 1;             // Cox on the standardised BLUP
+  double score_coef = 0, score_se = 0, score_df = 0, score_p = 1;  // the M_i coefficient of delta ~ 1 + M + X
+  double log_hr_sd = 0, hr_sd = 1, hr_se = 0;   // Cox on the standardised BLUP (and W); hr_se model-based
   double log_hr_unit = 0;   // per unit of the effect (count: per extra cell per target cell; allocation: per 100% of target cells)
-  double tau2 = 0;
+  double tau2 = 0;          // of the hazard ratio's shrinkage model
+  int n_units = 0, n_deaths = 0, q = 0;   // informative units and their deaths; columns of the patient design
+  double omega2 = std::numeric_limits<double>::quiet_NaN();   // B2's image variance when a covariate varies within
+                                                              // units and s2 was given (else NaN)
 };
 
-// x: optional per-row covariate (the log share of the `to` type); when given, the score test and the hazard
-// ratio are adjusted for it (empty: unadjusted).
+// X: optional covariate columns of the fraction model, row-major, one row per image row and p columns (the
+// abundance share and the covariates; a row with a NaN is left out); the score test is on (1, M, X) and the hazard
+// ratio's shrinkage model on (1, X). W: the covariates of the null Cox model, row-major per unit (pw columns); the
+// hazard ratio's Cox model has them too. Tested only when, among the informative units (an outcome and at least
+// one row), there is a death ("no_deaths") and a survivor ("no_survivors"), the units number at least q + 2
+// ("too_few_units"; q = 2 + p + the columns of X that vary within units, each of which has its patient mean in the
+// design), and the df are at least kMinDf ("too_few_df"). When a column of X varies within units, both models are
+// A/B's adjusted_design() (its patient-mean columns, omega2 by B2, tau2 on the patient summaries); s2: the rows'
+// sampling variances before the image random effect (rows from image_heterogeneity_rows), from which B2 re-estimates
+// omega2 (empty: the rows are taken without an image variance).
 SurvivalResult survival_test(const ImageRows& rows, const std::vector<int>& unit, int n_units,
                              const std::vector<double>& martingale, const std::vector<double>& time,
-                             const std::vector<int>& event, const std::vector<double>& x = {});
+                             const std::vector<int>& event, const std::vector<double>& X = {}, int p = 0,
+                             const std::vector<double>& W = {}, int pw = 0, const std::vector<double>& s2 = {});
 
 // ------------------------------------------------------ several radii ---
 
@@ -267,10 +329,15 @@ double cauchy_combine(const std::vector<double>& p);
 
 // max-T over radii with the sandwich correlation of the CR2 influences (PLAN_multiradius_maxT.md).
 // influence: K vectors (one per radius) over the same units; t and df per radius. Returns the p
-// value and the index of the radius with the largest |z|.
+// value and the index of the radius with the largest |z|. Any number of radii: a radius whose correlation with an
+// earlier kept one exceeds 0.995 is dropped; with c the largest |z| of the rest, p = P(max_k |Z_k| >= c) for
+// Z ~ N(0, R), by quadrature for two radii and by max_abs_tail (relative error about 1e-3) for more. error: its
+// error estimate (0 for one or two radii); converged: whether the error target was met.
 struct MaxTResult {
   double p = 1;
   int best = 0;
+  double error = 0;
+  bool converged = true;
 };
 MaxTResult max_t(const std::vector<std::vector<double>>& influence, const std::vector<double>& t,
                  const std::vector<double>& df);
@@ -282,27 +349,40 @@ MaxTResult max_t(const std::vector<std::vector<double>>& influence, const std::v
 MaxTResult davies_max(const std::vector<std::vector<double>>& influence, const std::vector<double>& t,
                       const std::vector<double>& df);
 
-// P(Z outside the rectangle [lower, upper]) for Z ~ N(0, R), R a correlation matrix (row-major K x K), as max_t
-// uses it: for K <= 2 the quadrature below (accurate to about 1e-10); for K >= 3 Genz-Bretz quasi-Monte Carlo
-// (mvn_outside_qmc) with an absolute error target of 1e-4.
+// P(Z outside the rectangle [lower, upper]) for Z ~ N(0, R), R a correlation matrix (row-major K x K): for K <= 2
+// the quadrature below (accurate to about 1e-10); for K >= 3 Genz-Bretz quasi-Monte Carlo (mvn_outside_qmc) with an
+// absolute error target of 1e-4. (max_t uses max_abs_tail for K >= 3.)
 double mvn_outside(const std::vector<double>& lower, const std::vector<double>& upper,
                    const std::vector<double>& R, int K);
 
 // Genz (1992) and Genz & Bretz (2009, Computation of Multivariate Normal and t Probabilities, Springer, Chapter 4)
-// quasi-Monte Carlo for the same probability (K <= 6): separation of variables on the Cholesky factor, with the
-// variables reordered so the narrowest expected interval comes first, integrated over the unit cube by Korobov
-// lattice rules of growing size with the baker's transformation and antithetic points, each rule under 12 random
-// shifts. The shifts come from a fixed-seed generator, so the result is the same on every call. The rules are
-// combined by inverse-variance weights until 3.5 standard errors are below `abseps`, or at most `max_points` points
-// (per shift, over all rules). Coordinates with conditional variance below 1e-10 (a singular R) are deterministic
-// given the others and enter as indicators.
+// quasi-Monte Carlo for the same probability, in any dimension: separation of variables on the Cholesky factor, with
+// the variables reordered so the narrowest expected interval comes first, integrated over the unit cube by a
+// Richtmyer sequence (generators the square roots of the primes; Genz & Bretz 2009, Section 4.2.2) of growing
+// length with the baker's transformation and antithetic points, under 12 random shifts. The shifts come from a fixed-
+// seed generator, so the result is the same on every call. Points are added (about 1.5 times as many each step, from
+// 64) until 3.5 standard errors of the mean over the shifts are below `abseps`, or at most `max_points` points per
+// shift. Coordinates with conditional variance below 1e-10 (a singular R) are deterministic given the others and
+// enter as indicators.
 struct MvnResult {
   double p = 0;
-  double error = 0;   // 3.5 standard errors of p over the shifts
-  long points = 0;    // lattice points used, per shift
+  double error = 0;        // 3.5 standard errors of p over the shifts
+  long points = 0;         // points used, per shift
+  bool converged = true;   // the error target was met
 };
 MvnResult mvn_outside_qmc(const std::vector<double>& lower, const std::vector<double>& upper,
                           const std::vector<double>& R, int K, double abseps = 1e-4, long max_points = 100000);
+
+// The same quasi-Monte Carlo for P(lower < Z < upper), Z ~ N(0, R) (limits may be infinite), until the error is at
+// most max(abseps, releps * p).
+MvnResult mvn_inside_qmc(const std::vector<double>& lower, const std::vector<double>& upper,
+                         const std::vector<double>& R, int K, double abseps, double releps, long max_points = 1000000);
+
+// The max-T tail P(max_k |Z_k| >= c), Z ~ N(0, R) (R row-major K x K), to a relative error of about `releps`, as the
+// sum of first-exceedance terms: 2 Phi(-c) + sum_{k >= 2} 2 P(Z_k >= c, |Z_j| < c for j < k), each term by
+// mvn_inside_qmc to `releps` of itself or, when smaller, to releps * 2 Phi(-c) / (K - 1). error: the sum of the
+// terms' errors (at most releps * p when converged); points: summed over the terms. Any K.
+MvnResult max_abs_tail(double c, const std::vector<double>& R, int K, double releps = 1e-3, long max_points = 1000000);
 
 // The quadrature max_t used up to spicyR 1.99.24, kept for comparison: recursive conditioning with Gauss-Legendre
 // quadrature (about 2e6 evaluations; K <= 6), relative accuracy kept in the tail.
@@ -347,20 +427,24 @@ struct PairTestInput {
 // The adjusted test of one pair (R/cell.R .cell_design, .cell_design_tau2 and .cell_contrasts of spicyR 1.99.23, two
 // conditions): rows (after the image random effect) with a group of 0 or 1 (negative: missing; left out) and
 // complete covariates (NaN: missing), the design of the two group indicators, the centred log share of the `from`
-// type (adjust; when not constant) and the centred covariates; tau2 re-estimated (-1) when every added column is
-// constant within units, else held at `tau2` (frailty; 0 without). design = 0: nothing to adjust for (no column
-// added); 1: adjusted, `tests` = the condition contrast, then one per added column (abundance first); 2: the design
+// type (adjust; when not constant) and the centred covariates. With frailty (else tau2 = 0): when every added column
+// is constant within units, tau2 is re-estimated under the design (-1); else the design is adjusted_design's (omega2
+// by B2 from `raw`, the rows before the image random effect, or no omega2 when `raw` is null; a patient-mean column
+// per image-level column; tau2 on the patient summaries). `tau2` (the unadjusted value, held up to spicyR 1.99.56)
+// is no longer used. design = 0: nothing to adjust for (no column added); 1: adjusted, `tests` = the condition
+// contrast, then one per added column (abundance first; with a mean column, its within-unit slope); 2: the design
 // failed (`tests[0].reason`). fit = false: the design is not fitted (the response has no variation); design 2 with
 // reason "no_variation" when there is something to adjust for, else 0.
 struct PairDesign {
   int design = 0;
   bool abundance = false;             // the abundance column entered the design
+  double omega2 = std::numeric_limits<double>::quiet_NaN();   // adjusted_design's omega2 (NaN when not re-estimated)
   std::vector<DesignResult> tests;
 };
 PairDesign pair_design_test(const ImageRows& rows, const std::vector<int>& unit, const std::vector<int>& group,
                             int n_units, const double* counts, int n_types, int from, bool adjust, const double* z,
                             int n_z, bool frailty, double tau2, bool hartung_knapp, bool fit = true,
-                            bool pooled_dispersion = false);
+                            bool pooled_dispersion = false, const ImageRows* raw = nullptr);
 
 // Results, per pair and radius at index p * K + k (K radii); the main test is the adjusted one when design == 1,
 // else the unadjusted one. Where the unadjusted test has no variation (se 0: 0 / 0) no design is fitted: design 2,
@@ -376,7 +460,8 @@ struct PairTests {
   std::vector<int> ok;                // the unadjusted test was done
   std::vector<int> side;              // allocation: 1 attraction, -1 avoidance; count: 0
   std::vector<int> n_rows;            // image rows tested
-  std::vector<double> tau2_image;     // NaN without the image random effect or rows
+  std::vector<double> tau2_image;     // the main test's (adjusted_design's B2 when it re-estimated it); NaN without
+                                      // the image random effect or rows
   std::vector<double> coef_ref, coef_comp, difference, se, df, p, tau2;   // the main test
   std::vector<double> u_difference, u_se, u_df, u_p;   // the unadjusted test
   std::vector<int> design;            // PairDesign::design
@@ -393,9 +478,11 @@ struct PairTests {
   std::vector<std::vector<double>> image_weight;
   // several radii, per pair with at least one radius tested: the radius chosen (0-based; -1 for none), the
   // combined p of the main and of the unadjusted test, and the main test's p at the chosen radius
-  // (comb_u_p only when there is something to adjust for, else NaN)
+  // (comb_u_p only when there is something to adjust for, else NaN); comb_converged: whether the main test's
+  // combined p met max_t's error target (1 or 0; always 1 for davies and cauchy; -1 for a pair tested at no radius)
   std::vector<int> best;
   std::vector<double> comb_p, comb_p_best, comb_u_p;
+  std::vector<int> comb_converged;
 };
 PairTests pair_tests(const PairTestInput& in);
 

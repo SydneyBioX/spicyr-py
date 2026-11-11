@@ -99,6 +99,6 @@ def test_max_t_quasi_monte_carlo_is_deterministic_and_near_the_quadrature():
         lo, hi = np.full(K, -cv), np.full(K, cv)
         p = _core.mvn_outside(lo, hi, R.ravel())
         assert _core.mvn_outside(lo, hi, R.ravel()) == p
-        q, err, _ = _core.mvn_outside_qmc(lo, hi, R.ravel())
+        q, err, _, _ = _core.mvn_outside_qmc(lo, hi, R.ravel())
         assert q == p and err < 1e-4
         assert abs(p - _core.mvn_outside_quadrature(lo, hi, R.ravel())) < 2e-4

@@ -6,6 +6,7 @@
 #include <pybind11/stl.h>
 
 #include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 #include <type_traits>
@@ -262,6 +263,7 @@ py::dict pair_tests_np(const py::list& a, const py::list& b, const py::list& sel
   out["rows"] = rows; out["image_weight"] = weight;
   out["best"] = arr(r.best); out["comb_p"] = arr(r.comb_p); out["comb_p_best"] = arr(r.comb_p_best);
   out["comb_u_p"] = arr(r.comb_u_p);
+  out["comb_converged"] = arr(r.comb_converged);   // 1 / 0; -1 for a pair tested at no radius
   return out;
 }
 
@@ -344,9 +346,15 @@ PYBIND11_MODULE(_core, m) {
     return rows_to(weighted_image_rows(sums.data(), n_images, n_labels, to, allocation, ig.empty() ? nullptr : ig.data()));
   }, py::arg("sums"), py::arg("n_labels"), py::arg("to"), py::arg("allocation"), py::arg("image_group") = py::none());
 
+  // the rows also keep their sampling variance s2 = v / n^2 (without tau2_image), from which an adjusted design
+  // re-estimates the image variance (adjusted_design)
   m.def("image_heterogeneity_rows", [](const py::dict& rows, const IntArray& unit) {
     double tau2 = 0;
-    py::dict d = rows_to(image_heterogeneity_rows(rows_from(rows), vec<int>(unit), &tau2));
+    const ImageRows in = rows_from(rows);
+    py::dict d = rows_to(image_heterogeneity_rows(in, vec<int>(unit), &tau2));
+    std::vector<double> s2(in.v.size());
+    for (std::size_t i = 0; i < s2.size(); ++i) s2[i] = in.v[i] / (in.n[i] * in.n[i]);
+    d["s2"] = arr(s2);
     d["tau2_image"] = tau2;
     return d;
   });
@@ -361,7 +369,7 @@ PYBIND11_MODULE(_core, m) {
     TestRules r = test_rules(allocation);
     py::dict o;
     o["pooled_dispersion"] = r.pooled_dispersion; o["min_effective_units"] = r.min_effective_units;
-    o["min_n_eff"] = kMinEffectiveUnits;
+    o["min_n_eff"] = kMinEffectiveUnits; o["min_df"] = kMinDf;
     return o;
   });
   m.def("label_clustering_factor", [](const Dataset& d, const IntArray& from, const IntArray& to, const DoubleArray& counts,
@@ -417,6 +425,28 @@ PYBIND11_MODULE(_core, m) {
   }, py::arg("rows"), py::arg("unit"), py::arg("Z"), py::arg("contrasts"), py::arg("k"), py::arg("tau2"),
      py::arg("hartung_knapp") = false);
 
+  // rows: the design's rows; with a key s2 (rows after the image random effect, image_heterogeneity_rows) omega2 is
+  // re-estimated by B2 from y = O and s2, else the rows are taken without an image variance. Z: row-major rows x q;
+  // q0: the condition columns of Z (first). Returns image_level and, when True, the rows (y, E = 0, n = 1,
+  // v = s2 + omega2), Z (rows x q') with the patient-mean columns, mean_of (0-based columns of the input Z), omega2
+  // and tau2.
+  m.def("adjusted_design", [](const py::dict& rows, const IntArray& unit, const DoubleArray& Z, int q, int q0,
+                              bool frailty) {
+    ImageRows r = rows_from(rows);
+    const bool het = rows.contains("s2");
+    if (het) r.v = vec<double>(rows["s2"].cast<DoubleArray>());
+    AdjustedDesign a = adjusted_design(r, vec<int>(unit), vec<double>(Z), q, q0, het, frailty);
+    py::dict o;
+    o["image_level"] = a.image_level;
+    if (!a.image_level) return o;
+    const std::size_t N = a.q > 0 ? a.Z.size() / static_cast<std::size_t>(a.q) : 0;
+    py::array_t<double> za({N, static_cast<std::size_t>(a.q)});
+    std::copy(a.Z.begin(), a.Z.end(), za.mutable_data());
+    o["rows"] = rows_to(a.rows); o["Z"] = za; o["q"] = a.q; o["mean_of"] = arr(a.mean_of);
+    o["omega2"] = a.omega2; o["tau2"] = a.tau2;
+    return o;
+  }, py::arg("rows"), py::arg("unit"), py::arg("Z"), py::arg("q"), py::arg("q0"), py::arg("frailty"));
+
   m.def("availability_test", [](const py::dict& rows, const IntArray& unit, const IntArray& group, int n_units,
                                 const DoubleArray& x, double tau2) {
     return design_dict(availability_test(rows_from(rows), vec<int>(unit), vec<int>(group), n_units, vec<double>(x), tau2));
@@ -430,16 +460,23 @@ PYBIND11_MODULE(_core, m) {
     return o;
   });
 
+  // X: row-major rows x p, the covariates of the fraction model (the abundance share and the covariates; p = 0: none);
+  // W: row-major units x pw, the covariates of the Cox models. Rows after the image random effect
+  // (image_heterogeneity_rows) carry s2, for B2's omega2 of an adjusted design.
   m.def("survival_test", [](const py::dict& rows, const IntArray& unit, int n_units, const DoubleArray& M,
-                            const DoubleArray& time, const IntArray& event, const DoubleArray& x) {
-    SurvivalResult r = survival_test(rows_from(rows), vec<int>(unit), n_units, vec<double>(M), vec<double>(time), vec<int>(event),
-                                     vec<double>(x));
+                            const DoubleArray& time, const IntArray& event, const DoubleArray& X, int p,
+                            const DoubleArray& W, int pw) {
+    const std::vector<double> s2 = rows.contains("s2") ? vec<double>(rows["s2"].cast<DoubleArray>()) : std::vector<double>();
+    SurvivalResult r = survival_test(rows_from(rows), vec<int>(unit), n_units, vec<double>(M), vec<double>(time),
+                                     vec<int>(event), vec<double>(X), p, vec<double>(W), pw, s2);
     py::dict o;
     o["ok"] = r.ok; o["reason"] = r.reason; o["score_coef"] = r.score_coef; o["score_se"] = r.score_se;
     o["score_df"] = r.score_df; o["score_p"] = r.score_p; o["log_hr_sd"] = r.log_hr_sd; o["hr_sd"] = r.hr_sd;
-    o["hr_se"] = r.hr_se; o["hr_p"] = r.hr_p; o["log_hr_unit"] = r.log_hr_unit; o["tau2"] = r.tau2;
+    o["hr_se"] = r.hr_se; o["log_hr_unit"] = r.log_hr_unit; o["tau2"] = r.tau2;
+    o["n_units"] = r.n_units; o["n_deaths"] = r.n_deaths; o["q"] = r.q; o["omega2"] = r.omega2;
     return o;
-  });
+  }, py::arg("rows"), py::arg("unit"), py::arg("n_units"), py::arg("M"), py::arg("time"), py::arg("event"),
+     py::arg("X"), py::arg("p"), py::arg("W"), py::arg("pw"));
 
   m.def("pair_tests", &pair_tests_np, py::arg("a"), py::arg("b"), py::arg("self_var"), py::arg("allocation"), py::arg("knn"),
         py::arg("counts"), py::arg("n_types"), py::arg("psi"), py::arg("from_"), py::arg("to"), py::arg("image_unit"),
@@ -451,7 +488,7 @@ PYBIND11_MODULE(_core, m) {
 
   m.def("max_t", [](const std::vector<std::vector<double>>& influence, const DoubleArray& t, const DoubleArray& df) {
     MaxTResult r = max_t(influence, vec<double>(t), vec<double>(df));
-    return py::make_tuple(r.p, r.best);
+    return py::make_tuple(r.p, r.best, r.error, r.converged);
   });
 
   m.def("davies_max", [](const std::vector<std::vector<double>>& influence, const DoubleArray& t, const DoubleArray& df) {
@@ -467,8 +504,17 @@ PYBIND11_MODULE(_core, m) {
                               long max_points) {
     MvnResult r = mvn_outside_qmc(vec<double>(lower), vec<double>(upper), vec<double>(R), static_cast<int>(lower.size()),
                                   abseps, max_points);
-    return py::make_tuple(r.p, r.error, r.points);
+    return py::make_tuple(r.p, r.error, r.points, r.converged);
   }, py::arg("lower"), py::arg("upper"), py::arg("R"), py::arg("abseps") = 1e-4, py::arg("max_points") = 100000);
+
+  // P(max_k |Z_k| >= c), Z ~ N(0, R) (R row-major K x K), to a relative error of about releps: (p, error, points,
+  // converged)
+  m.def("max_abs_tail", [](double c, const DoubleArray& R, double releps, double max_points) {
+    const int K = static_cast<int>(std::lround(std::sqrt(static_cast<double>(R.size()))));
+    if (static_cast<py::ssize_t>(K) * K != R.size()) throw std::invalid_argument("max_abs_tail: R must be K x K");
+    MvnResult r = max_abs_tail(c, vec<double>(R), K, releps, static_cast<long>(max_points));
+    return py::make_tuple(r.p, r.error, r.points, r.converged);
+  }, py::arg("c"), py::arg("R"), py::arg("releps") = 1e-3, py::arg("max_points") = 1e6);
 
   m.def("mvn_outside_quadrature", [](const DoubleArray& lower, const DoubleArray& upper, const DoubleArray& R) {
     return mvn_outside_quadrature(vec<double>(lower), vec<double>(upper), vec<double>(R), static_cast<int>(lower.size()));
