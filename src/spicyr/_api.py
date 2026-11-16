@@ -632,7 +632,7 @@ def _survival_setup(ctx, pheno, Z_extra=None):
     if Z_extra is None:
         W = np.zeros((m, 0))
     else:
-        W = pd.DataFrame(Z_extra).groupby(ctx.image_unit).mean().reindex(range(m)).to_numpy(float)
+        W = pd.DataFrame(Z_extra).groupby(ctx.image_unit).mean().reindex(range(m)).to_numpy(float, copy=True)
     ok_u = np.isfinite(time) & np.isfinite(event) & np.all(np.isfinite(W), axis=1)
     if not ok_u.any():
         raise ValueError("no patient has a survival outcome (and every covariate).")

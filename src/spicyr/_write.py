@@ -171,7 +171,7 @@ class _Writer:
             s = values[a:b]
             m = np.asarray(pd.isna(s), dtype=bool)
             if vtype is str:
-                out = np.asarray(s, dtype=object)
+                out = np.array(s, dtype=object)  # a copy: pandas 3 hands out read-only views
                 out[m] = fill
                 return out
             return s.to_numpy(dtype=vtype, na_value=fill)

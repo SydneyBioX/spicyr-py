@@ -1,5 +1,6 @@
 """spicy() reads a SpatialData (or AnnData) zarr store lazily, image by image, with the results of the in-memory path."""
 
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -38,7 +39,8 @@ def write_store(path, cells, coords="obsm", dtype=np.float64, per_image=False, d
     regions = list(obs["region"].cat.categories)
     table = TableModel.parse(a, region=regions, region_key="region", instance_key="instance_id")
     sdata = sd.SpatialData(tables={"table": table, "images": TableModel.parse(ad.AnnData(obs=img))})
-    with pytest.warns(UserWarning):  # the regions are not elements of the object
+    with warnings.catch_warnings():  # spatialdata < 0.9 warns that the regions are not elements of the object
+        warnings.simplefilter("ignore", UserWarning)
         sdata.write(path)
     return path
 

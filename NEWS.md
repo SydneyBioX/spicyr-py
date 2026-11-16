@@ -1,5 +1,11 @@
 # spicyr news
 
+## 1.99.42
+
+- Survival tests with covariates and writing results with string columns to a store work under pandas 3, whose
+  arrays are read-only (both raised "assignment destination is read-only"). `spicyr.__version__` reports the package
+  version again.
+
 ## 1.99.41
 
 - `combine="davies"` is now the default for several radii (it was `"maxT"`), as in spicyR 1.99.58. Davies' bound is a
