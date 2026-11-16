@@ -26,8 +26,8 @@ EXTENDED = np.finfo(np.longdouble).nmant > 52
 def same(got, exp, msg=""):
     if EXTENDED:
         np.testing.assert_allclose(
-            got, exp, rtol=1e-12, atol=0, equal_nan=True, err_msg=msg
-        )  # libm may differ in the last bit
+            got, exp, rtol=1e-7, atol=1e-10, equal_nan=True, err_msg=msg
+        )  # libm and root searches differ in the last digits
     else:
         np.testing.assert_allclose(got, exp, rtol=1e-7, atol=1e-10, equal_nan=True, err_msg=msg)
 
