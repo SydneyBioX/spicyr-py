@@ -23,7 +23,9 @@ EXTENDED = np.finfo(np.longdouble).nmant > 52
 
 def equal(x, y, err_msg):
     if EXTENDED:
-        np.testing.assert_array_equal(x, y, err_msg=err_msg)
+        np.testing.assert_allclose(
+            x, y, rtol=1e-12, atol=0, equal_nan=True, err_msg=err_msg
+        )  # libm may differ in the last bit
     else:
         np.testing.assert_allclose(x, y, rtol=1e-7, atol=1e-10, equal_nan=True, err_msg=err_msg)  # test_shared_cases
 
