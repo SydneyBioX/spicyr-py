@@ -470,7 +470,12 @@ def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, co
         _pairs_table(x, k, from_, to, allocation, adjusted, names, en0 if ens[k] is None else ens[k]) for k in range(K)
     ]
     fits = [
-        {"from": from_[i], "to": to[i], "rows": x["rows"][i], "unadjusted": {"image_weight": x["image_weight"][i]}}
+        {
+            "from": from_[i],
+            "to": to[i],
+            "rows": x["rows"][i],
+            "unadjusted": {"image_weight": x["image_weight"][i], "group_weight": x["group_weight"][i]},
+        }
         for i in range(len(pairs))
     ]
     if K == 1:
@@ -762,4 +767,9 @@ def _results(res, ctx, pheno, condition, subject, survival, radii, k, effect="co
         r=None if k is not None else radii,
         k=k,
         effect=effect,
+        condition_information=(
+            _cell.cell_condition_information(res["fits"], ctx).loc[list(tab.index)]
+            if not survival and not ctx.continuous and len(ctx.levels) == 2
+            else None
+        ),
     )

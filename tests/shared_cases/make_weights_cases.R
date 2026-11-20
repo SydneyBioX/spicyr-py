@@ -1,7 +1,7 @@
 ## Shared test cases for soft cell type membership (spicy(cellWeights =)): spicyR (R) computes the expected results
 ## on the cells of make_cases.R with the weights in weights.csv; tests/test_weights.py must reproduce them. Rerun after
 ## any change to the core or to either front end:
-##   Rscript tests/shared_cases/make_weights_cases.R      (needs spicyR >= 1.99.32)
+##   Rscript tests/shared_cases/make_weights_cases.R      (needs spicyR >= 1.99.59)
 suppressPackageStartupMessages(library(spicyR))
 out_dir <- file.path("tests", "shared_cases")
 cells <- utils::read.csv(file.path(out_dir, "cells.csv"))
@@ -28,12 +28,24 @@ cases <- list(
   soft_survival = list(condition = "os", subject = "patient", r = 30, from = "tumour", to = c("T", "lymphocyte"),
                        covariates = "age", adjustAbundance = TRUE)
 )
+## Two conditions: each condition's information per pair (spicyR >= 1.99.59) and, where testCorrelation() applies,
+## the correlation between the tests by CR2 and by 200 permutations
+.shared_correlation <- function(res, nm, out_dir) {
+  if (is.null(res$conditionInformation)) return(invisible())
+  utils::write.csv(res$conditionInformation, file.path(out_dir, paste0(nm, "_information.csv")), row.names = TRUE)
+  R <- tryCatch(testCorrelation(res), error = function(e) NULL)
+  if (is.null(R)) return(invisible())
+  utils::write.csv(R, file.path(out_dir, paste0(nm, "_correlation_cr2.csv")), row.names = TRUE)
+  utils::write.csv(testCorrelation(res, "permutation", nPermutations = 200),
+                   file.path(out_dir, paste0(nm, "_correlation_permutation.csv")), row.names = TRUE)
+}
 manifest <- list()
 for (nm in names(cases)) {
   a <- cases[[nm]]; d <- cells
   if (a$condition == "os") d$os <- survival::Surv(d$time, d$event)
   res <- suppressMessages(do.call(spicy, c(list(cells = d, cellWeights = W), a)))
   utils::write.csv(res$cellResults, file.path(out_dir, paste0(nm, ".csv")), row.names = TRUE)
+  .shared_correlation(res, nm, out_dir)
   manifest[[nm]] <- a
 }
 writeLines(jsonlite::toJSON(manifest, auto_unbox = TRUE, digits = NA, pretty = TRUE),

@@ -78,7 +78,11 @@ class SpicyResults:
     difference, its standard error, Satterthwaite df, p-value and BH-adjusted p-value, the frailty variance
     ``tau2``, what the test was adjusted for (``adjusted_for``), the effect and p-value of each adjustment
     (``abundance_effect``, ``<covariate>_effect``, ...) and the unadjusted test (``unadjusted_*``).
-    ``image_weights`` gives, for every pair, each image's share of its condition's information. For survival: the score test
+    ``image_weights`` gives, for every pair, each image's share of its condition's information, and with two
+    conditions ``condition_information`` gives that information for each pair (pairs x conditions: the sum of the
+    patients' weights; see :meth:`test_correlation`). With adjustment or several radii, ``pairwise_assoc``,
+    ``image_weights`` and ``condition_information`` are those of the unadjusted test at the radius nearest the
+    median. For survival: the score test
     (``score_coefficient``, ``p_value``) and the hazard ratio per SD of the shrunken excess.
 
     With more than two conditions each pair also has its overall test (``overall_F`` on ``overall_df1`` and
@@ -110,6 +114,7 @@ class SpicyResults:
     continuous: bool = False
     follow_up_results: pd.DataFrame | None = None
     alpha: float | None = None
+    condition_information: pd.DataFrame | None = None
 
     # --- spicyR-style matrices -----------------------------------------------------------------------
     def _wide(self, col):
@@ -143,6 +148,112 @@ class SpicyResults:
     @property
     def se(self) -> pd.DataFrame:
         return self._wide("score_se" if self.survival else "se")
+
+    def test_correlation(self, method: str = "cr2", n_permutations: int = 1000, cores: int = 1) -> pd.DataFrame:
+        """The correlation between the tests of the pairs.
+
+        The tests of pairs that share a cell type, or that are nested (a cell type and a group containing it), are
+        correlated through the patients they share. This estimates the correlation between every two pairs' tests from
+        the one fit, for a correction for multiple testing that uses it in place of independence.
+
+        Each pair's difference between conditions is a weighted mean over patients: a patient's summary is the
+        weighted mean of its images' effects (``pairwise_assoc``) with the images' weights (``image_weights``), and its
+        weight is the sum of its images' weights times its condition's information (``condition_information``).
+
+        ``method="cr2"``: each patient's CR2 influence on the difference, psi = h (summary - its condition's mean) /
+        sqrt(1 - h) with h the patient's share of its condition's weight, negated in the reference condition. Its
+        squares sum to the test's squared standard error, and the cross-products of two pairs' influences, divided by
+        the two standard errors, estimate the correlation of their differences. It is noisy when a few patients carry
+        most of a pair's weight and one condition is small.
+
+        ``method="permutation"``: the conditions are permuted over the patients ``n_permutations`` times; for each
+        permutation every test is recomputed in closed form from the patients' summaries and weights (each condition's
+        weighted mean, its CR2 variance and Satterthwaite df, as :func:`spicyr.spicy` computes them; the
+        between-patient variance is held at the fit's, and of spicy()'s rules for not testing a pair only the need for
+        two patients in each condition is applied), and its p-value is turned into a z with the sign of the difference
+        (0 when a condition has fewer than two of the pair's patients). The correlation of the tests' z over the permutations is returned. The permutations come from a
+        fixed seed, so a result always gives the same matrix, in Python and in R.
+
+        Needs two conditions, one radius (or ``k``), no adjustment (no covariates, ``adjust_abundance=False``) and
+        ``variance="cr2"``.
+
+        Parameters
+        ----------
+        method
+            ``"cr2"`` (the default) or ``"permutation"``.
+        n_permutations
+            The number of permutations for ``method="permutation"``.
+        cores
+            The number of threads for ``method="permutation"``.
+
+        Returns
+        -------
+        A symmetric DataFrame with one row and one column per row of ``cell_results`` (the same index): the estimated
+        correlation between the pairs' tests. The diagonal is 1, and rows and columns of pairs not tested (or, by
+        permutation, whose z is the same in every permutation) are NaN.
+        """
+        from . import _core
+
+        if method not in ("cr2", "permutation"):
+            raise ValueError("method must be 'cr2' or 'permutation'.")
+        if self.condition_information is None:
+            raise ValueError(
+                "the result has no condition_information: test_correlation() needs a test of two conditions (not "
+                "more conditions, a continuous condition or survival) from spicyr 1.99.43 or later."
+            )
+        if self.r is not None and len(self.r) > 1:
+            raise ValueError(
+                "test_correlation() needs one radius (or k): with several radii each pair's test combines them."
+            )
+        tab = self.cell_results
+        if "adjusted_for" in tab.columns:
+            raise ValueError("test_correlation() needs unadjusted tests (no covariates and adjust_abundance=False).")
+        if self.variance is not None and self.variance != "cr2":
+            raise ValueError('test_correlation() needs variance="cr2".')
+        if method == "permutation" and (
+            isinstance(n_permutations, bool)
+            or not np.isscalar(n_permutations)
+            or not np.isfinite(n_permutations)
+            or not 2 <= n_permutations <= 1e7
+        ):
+            raise ValueError("`n_permutations` must be a number from 2 to 1e7.")
+        if isinstance(cores, bool) or not np.isscalar(cores) or not np.isfinite(cores) or cores < 1:
+            raise ValueError("`cores` must be a positive number of threads.")
+        labels = list(tab.index)
+        # the patients as spicy() codes them (an image with no subject is a patient of its own)
+        unit = [
+            i if s is None or (isinstance(s, float) and np.isnan(s)) else s
+            for s, i in zip(self.subject if self.subject is not None else self.image_ids, self.image_ids, strict=True)
+        ]
+        codes, units = pd.factorize(pd.Series(unit, dtype=object), sort=False)
+        group = np.array([-1 if c is None else self.levels.index(c) for c in self.condition], dtype=np.int32)
+        tested = tab["p_value"].notna().to_numpy()
+        y = np.array([self.pairwise_assoc[k] for k in labels], dtype=float).reshape(len(labels), len(group))
+        w = np.array([self.image_weights[k] for k in labels], dtype=float).reshape(len(labels), len(group))
+        y[~tested, :] = np.nan
+        w[~tested, :] = np.nan
+        R, difference, se, _ = _core.test_correlation(
+            y,
+            w,
+            codes.astype(np.int32),
+            group,
+            len(units),
+            self.condition_information.loc[labels].to_numpy(float),
+            0 if method == "cr2" else int(n_permutations),
+            np.zeros(0, dtype=np.int32),
+            int(cores),
+        )
+        # the per-image values must be those of the reported tests
+        d0 = tab["excess_difference"].to_numpy(float)[tested]
+        s0 = tab["se"].to_numpy(float)[tested]
+        ok = (np.abs(difference[tested] - d0) <= 1e-8 * np.maximum(np.abs(d0), s0)) & (
+            np.abs(se[tested] - s0) <= 1e-8 * s0
+        )
+        if not ok.all():
+            raise ValueError(
+                "the per-image effects and weights do not give the tests (an adjusted test or a variance other than CR2?)."
+            )
+        return pd.DataFrame(R, index=tab.index.copy(), columns=tab.index.copy())
 
     # --- accessors -----------------------------------------------------------------------------------
     def top_pairs(

@@ -1,5 +1,17 @@
 # spicyr news
 
+## 1.99.43
+
+- New `SpicyResults.test_correlation()`: the correlation between the tests of a result (two conditions, one radius or
+  `k`, no adjustment, CR2 variance), estimated from the one fit, for a correction for multiple testing that uses it.
+  `method="cr2"` (the default) gives the CR2 cross-products: each patient's influence on each pair's difference, whose
+  squares sum to the test's se^2; `method="permutation"` permutes the conditions over the patients (`n_permutations`,
+  from a fixed seed, the same permutations as spicyR's `testCorrelation()`) and recomputes every test in closed form
+  from the patients' summaries and weights, and gives the correlation of the tests' z. As in spicyR 1.99.59.
+- With two conditions the result has `condition_information`: for each pair, each condition's information in its
+  test (the sum of the patients' weights), which with `pairwise_assoc` and `image_weights` gives every patient's
+  summary and weight. Every other field, and every result, is unchanged.
+
 ## 1.99.42
 
 - Survival tests with covariates and writing results with string columns to a store work under pandas 3, whose

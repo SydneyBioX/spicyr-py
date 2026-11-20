@@ -1,6 +1,6 @@
 ## Shared test cases for the twins: spicyR (R) computes the expected results; the Python tests
 ## (tests/test_shared_cases.py) must reproduce them. Rerun after any change to the core or to either front end:
-##   Rscript tests/shared_cases/make_cases.R      (needs spicyR >= 1.99.57)
+##   Rscript tests/shared_cases/make_cases.R      (needs spicyR >= 1.99.59)
 suppressPackageStartupMessages(library(spicyR))
 out_dir <- file.path("tests", "shared_cases")
 set.seed(20261002)
@@ -69,6 +69,17 @@ cases <- list(
   survival_few = list(condition = "os_few", subject = "patient", r = 30, from = "tumour", to = c("T", "B"),
                       adjustAbundance = TRUE)
 )
+## Two conditions: each condition's information per pair (spicyR >= 1.99.59) and, where testCorrelation() applies,
+## the correlation between the tests by CR2 and by 200 permutations
+.shared_correlation <- function(res, nm, out_dir) {
+  if (is.null(res$conditionInformation)) return(invisible())
+  utils::write.csv(res$conditionInformation, file.path(out_dir, paste0(nm, "_information.csv")), row.names = TRUE)
+  R <- tryCatch(testCorrelation(res), error = function(e) NULL)
+  if (is.null(R)) return(invisible())
+  utils::write.csv(R, file.path(out_dir, paste0(nm, "_correlation_cr2.csv")), row.names = TRUE)
+  utils::write.csv(testCorrelation(res, "permutation", nPermutations = 200),
+                   file.path(out_dir, paste0(nm, "_correlation_permutation.csv")), row.names = TRUE)
+}
 manifest <- list()
 for (nm in names(cases)) {
   a <- cases[[nm]]; d <- cells
@@ -80,6 +91,7 @@ for (nm in names(cases)) {
   utils::write.csv(tab, file.path(out_dir, paste0(nm, ".csv")), row.names = TRUE)
   if (!is.null(res$followUpResults)) utils::write.csv(res$followUpResults, file.path(out_dir, paste0(nm, "_followups.csv")), row.names = TRUE)
   if (!is.null(res$radiusResults)) utils::write.csv(res$radiusResults, file.path(out_dir, paste0(nm, "_radii.csv")), row.names = FALSE)
+  .shared_correlation(res, nm, out_dir)
   manifest[[nm]] <- a
 }
 writeLines(jsonlite::toJSON(manifest, auto_unbox = TRUE, digits = NA, pretty = TRUE), file.path(out_dir, "cases.json"))

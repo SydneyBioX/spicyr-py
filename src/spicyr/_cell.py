@@ -1336,6 +1336,23 @@ def cell_image_excess(fits, ctx) -> dict:
     return out
 
 
+def cell_condition_information(fits, ctx) -> pd.DataFrame:
+    """Two conditions: the information of each condition in every pair's test.
+
+    The sum of its patients' weights in the frailty model (an image's weight in cell_image_weight() is its share of
+    it): pairs x conditions, NaN where the pair was not tested.
+    """
+    rows = []
+    for o in fits:
+        v = (o.get("unadjusted") or {}).get("group_weight")
+        rows.append(np.asarray(v, dtype=float) if v is not None and len(v) == 2 else np.full(2, np.nan))
+    return pd.DataFrame(
+        np.array(rows).reshape(len(fits), 2),
+        index=[f"{o['from']}__{o['to']}" for o in fits],
+        columns=list(ctx.levels),
+    )
+
+
 def cell_image_weight(fits, ctx) -> dict:
     """Per-image weight of every pair.
 

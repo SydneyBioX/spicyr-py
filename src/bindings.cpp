@@ -258,9 +258,11 @@ py::dict pair_tests_np(const py::list& a, const py::list& b, const py::list& sel
   out["design_reason"] = py::cast(r.design_reason);   // a list, pair-major (p * K + k)
   out["not_tested"] = py::cast(r.not_tested);         // a list, pair-major (p * K + k); "" where tested
   out["effect"] = pke(r.effect); out["effect_p"] = pke(r.effect_p);
-  py::list rows, weight;
-  for (std::size_t p = 0; p < P; ++p) { rows.append(rows_to(r.rows[p])); weight.append(arr(r.image_weight[p])); }
-  out["rows"] = rows; out["image_weight"] = weight;
+  py::list rows, weight, group_weight;
+  for (std::size_t p = 0; p < P; ++p) {
+    rows.append(rows_to(r.rows[p])); weight.append(arr(r.image_weight[p])); group_weight.append(arr(r.group_weight[p]));
+  }
+  out["rows"] = rows; out["image_weight"] = weight; out["group_weight"] = group_weight;
   out["best"] = arr(r.best); out["comb_p"] = arr(r.comb_p); out["comb_p_best"] = arr(r.comb_p_best);
   out["comb_u_p"] = arr(r.comb_u_p);
   out["comb_converged"] = arr(r.comb_converged);   // 1 / 0; -1 for a pair tested at no radius
@@ -388,10 +390,34 @@ PYBIND11_MODULE(_core, m) {
     o["difference"] = r.difference; o["se"] = r.se; o["df"] = r.df; o["p"] = r.p; o["tau2"] = r.tau2;
     o["influence"] = arr(r.influence); o["unit_summary"] = arr(r.unit_summary); o["unit_info"] = arr(r.unit_info);
     o["image_weight"] = arr(r.image_weight); o["n_eff"] = arr(r.n_eff);
-    o["n_units"] = arr(r.n_units);
+    o["n_units"] = arr(r.n_units); o["group_weight"] = arr(r.group_weight);
     return o;
   }, py::arg("rows"), py::arg("unit"), py::arg("group"), py::arg("n_units"), py::arg("frailty"), py::arg("variance"),
      py::arg("pooled_dispersion") = false);
+
+  // y, w: tests x images (C order); group_weight: tests x 2; n_perms = 0: the CR2 cross-products, else n_perms
+  // relabellings, generated in the core when perms is empty, or perms: n_perms x units conditions (0, 1; -1 for none).
+  // Returns (R tests x tests, difference, se, z tests x n_perms).
+  m.def("test_correlation", [](const DoubleArray& y, const DoubleArray& w, const IntArray& image_unit,
+                               const IntArray& image_group, int n_units, const DoubleArray& group_weight, int n_perms,
+                               const IntArray& perms, int n_threads) {
+    const py::ssize_t N = image_unit.size(), T = N > 0 ? y.size() / N : 0;
+    if (y.size() != T * N || w.size() != T * N || image_group.size() != N || group_weight.size() != 2 * T || n_perms < 0 ||
+        (perms.size() > 0 && perms.size() != static_cast<py::ssize_t>(n_perms) * n_units))
+      throw std::invalid_argument("test_correlation: inputs of the wrong size");
+    TestCorrelation r;
+    {
+      py::gil_scoped_release release;
+      r = test_correlation(y.data(), w.data(), static_cast<int>(T), static_cast<int>(N), image_unit.data(),
+                           image_group.data(), n_units, group_weight.data(), perms.size() > 0 ? perms.data() : nullptr,
+                           n_perms, n_threads);
+    }
+    py::array_t<double> R({T, T}), z({T, static_cast<py::ssize_t>(n_perms)});
+    std::copy(r.R.begin(), r.R.end(), R.mutable_data());
+    std::copy(r.z.begin(), r.z.end(), z.mutable_data());
+    return py::make_tuple(R, arr(r.difference), arr(r.se), z);
+  }, py::arg("y"), py::arg("w"), py::arg("image_unit"), py::arg("image_group"), py::arg("n_units"),
+     py::arg("group_weight"), py::arg("n_perms"), py::arg("perms"), py::arg("n_threads") = 1);
 
   m.def("design_test", [](const py::dict& rows, const IntArray& unit, int n_units, const DoubleArray& Z,
                           const DoubleArray& contrast, double tau2) {

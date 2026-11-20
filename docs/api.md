@@ -24,7 +24,7 @@
 
 ```{eval-rst}
 .. autoclass:: spicyr.SpicyResults
-   :members: top_pairs, top_follow_ups, bind, box_plot, signif_plot, radius_plot, coefficient, p_value, se
+   :members: top_pairs, top_follow_ups, bind, box_plot, signif_plot, radius_plot, test_correlation, coefficient, p_value, se
 ```
 
 The attributes of a results object:
@@ -36,6 +36,7 @@ The attributes of a results object:
 | `radius_results` | with several radii, one row per pair and radius (what `radius_plot()` shows) |
 | `pairwise_assoc` | the effect of every pair in every image (what `bind()` returns) |
 | `image_weights` | the weight of every image in the test of every pair: its share of its group's information (the point sizes of `box_plot()`, and the `weight` column of `bind(from_=, to=)`) |
+| `condition_information` | with two conditions, each condition's information in the test of every pair (one row per pair, one column per group: the sum of its patients' weights); an image's weight times it is the image's weight on the scale of the model (what `test_correlation()` uses) |
 | `levels`, `image_ids`, `condition`, `subject`, `r`, `k`, `effect` | the groups, images and settings of the analysis (`effect`: "allocation" or "count") |
 
 ## Proportions
