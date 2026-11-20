@@ -1,5 +1,11 @@
 # spicyr news
 
+## 1.99.44
+
+- Images with no `subject` are one patient, as in spicyR, under every pandas version. Under pandas 2 each such
+  image was a patient of its own, and under pandas 3 they were one, so results with missing subjects depended on the
+  pandas version. `test_correlation()` codes the patients the same way.
+
 ## 1.99.43
 
 - New `SpicyResults.test_correlation()`: the correlation between the tests of a result (two conditions, one radius or

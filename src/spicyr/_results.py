@@ -220,12 +220,9 @@ class SpicyResults:
         if isinstance(cores, bool) or not np.isscalar(cores) or not np.isfinite(cores) or cores < 1:
             raise ValueError("`cores` must be a positive number of threads.")
         labels = list(tab.index)
-        # the patients as spicy() codes them (an image with no subject is a patient of its own)
-        unit = [
-            i if s is None or (isinstance(s, float) and np.isnan(s)) else s
-            for s, i in zip(self.subject if self.subject is not None else self.image_ids, self.image_ids, strict=True)
-        ]
-        codes, units = pd.factorize(pd.Series(unit, dtype=object), sort=False)
+        # the patients as spicy() codes them (images with no subject are one patient)
+        unit = self.subject if self.subject is not None else self.image_ids
+        codes, units = pd.factorize(pd.Series(unit, dtype=object), sort=False, use_na_sentinel=False)
         group = np.array([-1 if c is None else self.levels.index(c) for c in self.condition], dtype=np.int32)
         tested = tab["p_value"].notna().to_numpy()
         y = np.array([self.pairwise_assoc[k] for k in labels], dtype=float).reshape(len(labels), len(group))

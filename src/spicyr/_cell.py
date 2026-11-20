@@ -221,11 +221,14 @@ def cell_context(
         if not ctx.has(subject):
             raise ValueError("`subject` column not found.")
         sv, sv_all, _ = _values(ctx, subject, first_row_code)
-        if as_str(sv_all).nunique() != n_images:
-            sub = as_str(sv).to_numpy()
-            ctx.unit_labels = list(dict.fromkeys(sub))
-            ui = {s: i for i, s in enumerate(ctx.unit_labels)}
-            ctx.image_unit = np.array([ui[s] for s in sub], dtype=int)
+        if as_str(sv_all).nunique(dropna=False) != n_images:
+            # in order of first appearance; images with no subject are one patient (as R's unique()), whatever the
+            # pandas version's missing values
+            codes, uniques = pd.factorize(
+                pd.Series(as_str(sv).to_numpy(), dtype=object), sort=False, use_na_sentinel=False
+            )
+            ctx.unit_labels = list(uniques)
+            ctx.image_unit = codes.astype(int)
 
     if condition is not None and not survival:
         cv, cv_all, img_of_row = _values(ctx, condition, first_row_code)

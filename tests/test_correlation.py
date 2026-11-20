@@ -145,7 +145,7 @@ def test_refused_where_the_tests_cannot_be_rebuilt():
 
 
 def test_missing_condition_and_subject():
-    """Patients with a missing condition take no part; an image with a missing subject is a patient, as in spicy()."""
+    """Patients with a missing condition take no part; images with a missing subject are one patient, as in spicy()."""
     cm = CELLS.copy()
     cm.loc[cm["patient"].isin(["A02", "B03"]), "condition"] = np.nan
     res = spicyr.spicy(cm, condition="condition", subject="patient", r=30, from_="tumour")
@@ -159,3 +159,16 @@ def test_missing_condition_and_subject():
     res = spicyr.spicy(cs, condition="condition", subject="patient", r=30, from_="tumour")
     R = res.test_correlation().to_numpy()
     assert (np.diag(R)[res.cell_results["p_value"].notna().to_numpy()] == 1).all()
+
+
+def test_missing_subject_is_one_patient():
+    """Images with no subject are one patient (as R's spicy()), whatever the pandas version: the results are those of
+    the same images given one subject label."""
+    cs = CELLS.copy()
+    cs.loc[cs["patient"] == "A02", "patient"] = np.nan
+    cl = CELLS.copy()
+    cl.loc[cl["patient"] == "A02", "patient"] = "no_subject"
+    kw = {"condition": "condition", "subject": "patient", "r": 30, "from_": "tumour"}
+    a = spicyr.spicy(cs, **kw).cell_results
+    b = spicyr.spicy(cl, **kw).cell_results
+    pd.testing.assert_frame_equal(a, b)
