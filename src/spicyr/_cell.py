@@ -587,8 +587,12 @@ def cell_weighted(
 
     For each ``from`` label, one neighbour pass gives the weighted random-labelling sums of every ``to`` label
     (Dataset.weighted_excess_sums); each pair's image rows then go through the side, the image random effect and the
-    test as cell_pair_test() takes them for cell types. With 0/1 weights the results are those of the cell types.
-    Self-pairs are not tested. ``survival_test(wctx, rows, f, t)``, if given, replaces the condition test.
+    test as cell_pair_test() takes them for cell types. With 0/1 weights the results are those of the cell types. The
+    null shuffles the ``to`` weights over the candidates (the cells whose ``from`` weight is below 1). A label with
+    itself, and a pair where some ``to`` cells have ``from`` weight 1 (a group and one of its subtypes), are instead
+    tested under random labelling of all the image's cells, each cell keeping its pair of weights: allocation with 0/1
+    weights by Dataset.overlap_moments (a self-pair of a cell type then gives the cell-type self-pair), every other
+    case by Dataset.overlap_soft_rows. ``survival_test(wctx, rows, f, t)``, if given, replaces the condition test.
     """
     allocation = effect == "allocation"
     ctx.data.build_radius_index(float(r))
@@ -597,18 +601,59 @@ def cell_weighted(
     ptr = rows_in_order.indptr.astype(np.int32)
     lab = rows_in_order.indices.astype(np.int32)
     w = rows_in_order.data.astype(float)
-    pairs = [p for p in pairs if p[0] != p[1]]
+    ov = membership_overlap(memb, labels, pairs)
+    pairs = [p for p in pairs if p[0] != p[1] or ov["relabel"][(labels.index(p[0]), labels.index(p[1]))]]
     if not pairs:
-        raise ValueError("with `cell_weights`, `from_` and `to` must give at least one pair of different labels.")
+        raise ValueError("with `cell_weights`, `from_` and `to` must give at least one pair that can be tested.")
+    from_ = [p[0] for p in pairs]
+    to = [p[1] for p in pairs]
+    relabel = [ov["relabel"][(labels.index(f), labels.index(t))] for f, t in pairs]
+    # 0/1 weights with the allocation effect: the moments from the counts alone
+    counts = [
+        rl and allocation and ov["binary"][labels.index(f)] and ov["binary"][labels.index(t)]
+        for rl, f, t in zip(relabel, from_, to, strict=True)
+    ]
+    mom = None
+    if any(counts):
+        mom = overlap_moments(
+            ctx,
+            memb,
+            labels,
+            ov,
+            [f for f, c in zip(from_, counts, strict=True) if c],
+            [t for t, c in zip(to, counts, strict=True) if c],
+        )
     wctx = weighted_context(ctx, memb, labels)
     ig = None if ctx.image_group is None else np.asarray(ctx.image_group, dtype=np.int32)
     fits = [None] * len(pairs)
-    for f in dict.fromkeys(p[0] for p in pairs):
-        a = memb[:, labels.index(f)].toarray().ravel()
-        sums = ctx.data.weighted_excess_sums(a[ctx.ord], ptr, lab, w, K, allocation)
-        for k in [k for k, p in enumerate(pairs) if p[0] == f]:
-            t = pairs[k][1]
-            rows = _core.weighted_image_rows(sums, K, labels.index(t), allocation, ig)
+
+    def weights_of(j):
+        return memb[:, j].toarray().ravel()[ctx.ord]
+
+    for f in dict.fromkeys(from_):
+        jf = labels.index(f)
+        a = weights_of(jf)
+        mine = [k for k, g in enumerate(from_) if g == f]
+        sums = ctx.data.weighted_excess_sums(a, ptr, lab, w, K, allocation)
+        all_sums = None
+        if any(counts[k] for k in mine):
+            all_sums = ctx.data.weighted_score_sums(a, ptr, lab, w, K, allocation).reshape(ctx.n_images, K)
+        # the other relabelled pairs of this `from` label in one pass over each image's graph
+        soft = [k for k in mine if relabel[k] and not counts[k]]
+        S = None
+        if soft:
+            b = np.concatenate([weights_of(labels.index(to[k])) for k in soft])
+            S = ctx.data.overlap_soft_rows(a, b, len(soft), allocation).reshape(ctx.n_images, len(soft), 4)
+        for k in mine:
+            t = to[k]
+            if counts[k]:
+                q = sum(counts[: k + 1]) - 1
+                rows = overlap_rows(all_sums[:, labels.index(t)], mom["E"][q], mom["V"][q], mom["nT"][q], ig, True)
+            elif relabel[k]:
+                s = S[:, soft.index(k), :]
+                rows = overlap_rows(s[:, 0], s[:, 1], s[:, 2], s[:, 3], ig, allocation)
+            else:
+                rows = _core.weighted_image_rows(sums, K, labels.index(t), allocation, ig)
             rows["unit"] = ctx.image_unit[rows["img"]].astype(np.int32)
             if ctx.image_group is not None:
                 rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)
@@ -623,6 +668,80 @@ def cell_weighted(
             else:
                 fits[k] = cell_rows_test(wctx, rows, f, t, True, variance, adjust, Z_extra, extra_names)
     return {"fits": fits}
+
+
+def membership_overlap(memb, labels, pairs) -> dict:
+    """Labels with 0/1 weights only (binary), the cells of each label, and which requested pairs are relabelled.
+
+    A pair (by label index) is tested under random labelling of all the cells (relabel) when it is a label with cells
+    paired with itself, or when some ``to`` cells have ``from`` weight 1 (they are not candidates of the shuffle of the
+    ``to`` weights).
+    """
+    K = len(labels)
+    csc = memb.tocsc()
+    csc.sort_indices()
+    cells_of = [csc.indices[csc.indptr[j] : csc.indptr[j + 1]] for j in range(K)]
+    full_of = [c[csc.data[csc.indptr[j] : csc.indptr[j + 1]] == 1] for j, c in enumerate(cells_of)]
+    binary = [bool(np.all(csc.data[csc.indptr[j] : csc.indptr[j + 1]] == 1)) for j in range(K)]
+    jf = [labels.index(p[0]) for p in pairs]
+    jt = [labels.index(p[1]) for p in pairs]
+    relabel = {}
+    for a in dict.fromkeys(jf):
+        mark = np.zeros(memb.shape[0], dtype=bool)
+        mark[full_of[a]] = True
+        for b in dict.fromkeys(t for f, t in zip(jf, jt, strict=True) if f == a):
+            relabel[(a, b)] = len(cells_of[a]) > 0 if a == b else bool(np.any(mark[cells_of[b]]))
+    return {"binary": binary, "cells_of": cells_of, "relabel": relabel}
+
+
+def overlap_moments(ctx, memb, labels, ov, from_, to) -> dict:
+    """Random-labelling moments (Dataset.overlap_moments) of 0/1 labels that share cells, pairs x images.
+
+    Self-pairs take spicy()'s ``self_variance``. Also returns ``nT``, each image's number of ``to`` cells.
+    """
+    jf = [labels.index(f) for f in from_]
+    jt = [labels.index(t) for t in to]
+    img = ctx.image_map[ctx.source.image_codes]
+    P, n = len(jf), ctx.n_images
+
+    def tab(cells):
+        i = img[cells]
+        return np.bincount(i[i >= 0], minlength=n).astype(float)
+
+    nF, nT, nFT = np.zeros((P, n)), np.zeros((P, n)), np.zeros((P, n))
+    for q in range(P):
+        cf, ct = ov["cells_of"][jf[q]], ov["cells_of"][jt[q]]
+        mark = np.zeros(memb.shape[0], dtype=bool)
+        mark[cf] = True
+        nF[q], nT[q], nFT[q] = tab(cf), tab(ct), tab(ct[mark[ct]])
+    self = np.array([a == b for a, b in zip(jf, jt, strict=True)], dtype=np.int32)
+    # image-major (img * P + q), as the core takes them
+    E, V = ctx.data.overlap_moments(nF.T.ravel(), nT.T.ravel(), nFT.T.ravel(), self, *_self_var_args(ctx))
+    return {"E": E.reshape(n, P).T, "V": V.reshape(n, P).T, "nT": nT}
+
+
+def overlap_rows(O, E, v, nB, image_group, allocation) -> dict:
+    """The image rows of a pair tested under random labelling of all the cells (as _core.weighted_image_rows).
+
+    O over all the image's cells, its mean E and variance v, n the summed ``to`` weight; with allocation, the side and
+    room guard as _core.allocation_image_rows.
+    """
+    keep = (nB > 0) & (v > 0)
+    if image_group is not None:
+        keep &= image_group >= 0
+    d = {
+        "img": np.flatnonzero(keep).astype(np.int32),
+        "O": np.asarray(O[keep], dtype=float),
+        "E": np.asarray(E[keep], dtype=float),
+        "n": np.asarray(nB[keep], dtype=float),
+        "v": np.asarray(v[keep], dtype=float),
+    }
+    if not allocation:
+        return d
+    avoid = float(np.sum(d["O"] - d["E"])) < 0
+    d["n"] = d["E"].copy() if avoid else d["n"] - d["E"]
+    room = d["n"] >= 1
+    return {k: x[room] for k, x in d.items()}
 
 
 def _subset_rows(rows, keep) -> dict:

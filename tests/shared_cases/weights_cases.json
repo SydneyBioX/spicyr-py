@@ -37,5 +37,63 @@
     "to": ["T", "lymphocyte"],
     "covariates": "age",
     "adjustAbundance": true
+  },
+  "soft_count_self": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "effect": "count",
+    "from": ["T", "lymphocyte", "tumour"],
+    "to": ["T", "lymphocyte", "B"]
+  },
+  "soft_continuous_self": {
+    "condition": "age",
+    "subject": "patient",
+    "r": 30,
+    "from": ["T", "lymphocyte"],
+    "to": ["T", "lymphocyte"]
+  },
+  "soft_survival_self": {
+    "condition": "os",
+    "subject": "patient",
+    "r": 30,
+    "from": ["B", "lymphocyte"],
+    "to": ["B", "lymphocyte"],
+    "effect": "count"
+  },
+  "binary_allocation": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "weights": "binary",
+    "from": ["lymphocyte", "T", "tumour"],
+    "to": ["lymphocyte", "T", "B", "tumour"]
+  },
+  "binary_count": {
+    "condition": "condition",
+    "subject": "patient",
+    "r": 30,
+    "weights": "binary",
+    "effect": "count",
+    "from": ["lymphocyte", "T", "tumour"],
+    "to": ["lymphocyte", "T", "B", "tumour"]
+  },
+  "binary_three_levels": {
+    "condition": "stage",
+    "subject": "patient",
+    "r": 30,
+    "weights": "binary",
+    "from": ["lymphocyte", "B"],
+    "to": ["lymphocyte", "B"],
+    "selfVariance": "exact"
+  },
+  "binary_survival": {
+    "condition": "os",
+    "subject": "patient",
+    "r": 30,
+    "weights": "binary",
+    "from": ["lymphocyte", "T"],
+    "to": ["lymphocyte", "T"],
+    "adjustAbundance": true
   }
 }

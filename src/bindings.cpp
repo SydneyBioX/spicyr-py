@@ -296,6 +296,30 @@ PYBIND11_MODULE(_core, m) {
         return arr(d.weighted_excess_sums(vec<double>(a), vec<int>(ptr), vec<int>(lab), vec<double>(w), n_labels,
                                           allocation));
       }, py::arg("a"), py::arg("ptr"), py::arg("lab"), py::arg("w"), py::arg("n_labels"), py::arg("allocation"))
+      // labels that share cells: per image and label (image-major, img * n_labels + label), the sum of b h over all the
+      // image's cells (arguments as weighted_excess_sums)
+      .def("weighted_score_sums", [](const Dataset& d, const DoubleArray& a, const IntArray& ptr, const IntArray& lab,
+                                     const DoubleArray& w, int n_labels, bool allocation) {
+        return arr(d.weighted_score_sums(vec<double>(a), vec<int>(ptr), vec<int>(lab), vec<double>(w), n_labels,
+                                         allocation));
+      }, py::arg("a"), py::arg("ptr"), py::arg("lab"), py::arg("w"), py::arg("n_labels"), py::arg("allocation"))
+      // allocation, 0/1 labels that share cells: nF, nT, nFT per image and pair (image-major, img * n_pairs + p), self
+      // one flag per pair (a label with itself). Returns (E, V), image-major
+      .def("overlap_moments", [](const Dataset& d, const DoubleArray& nF, const DoubleArray& nT, const DoubleArray& nFT,
+                                 const IntArray& self, int self_var_method, int self_var_cells) {
+        const int n_pairs = static_cast<int>(self.size());
+        std::vector<double> E, V;
+        d.overlap_moments(vec<double>(nF), vec<double>(nT), vec<double>(nFT), vec<int>(self), n_pairs, self_var_method,
+                          self_var_cells, E, V);
+        return py::make_tuple(arr(E), arr(V));
+      }, py::arg("nF"), py::arg("nT"), py::arg("nFT"), py::arg("self"), py::arg("self_var_method"),
+         py::arg("self_var_cells"))
+      // FROM weights a (one per cell) and TO weights b (n_pairs labels, pair-major: p * n_cells + cell). Per image and
+      // pair ((img * n_pairs + p) * 4): O, E, the variance and sum b
+      .def("overlap_soft_rows", [](const Dataset& d, const DoubleArray& a, const DoubleArray& b, int n_pairs,
+                                   bool allocation) {
+        return arr(d.overlap_soft_rows(vec<double>(a), vec<double>(b), n_pairs, allocation));
+      }, py::arg("a"), py::arg("b"), py::arg("n_pairs"), py::arg("allocation"))
       // several radii from one neighbour search: per radius (any, self_expected, self_var) or (totals, sq, self_var), as
       // the single-radius calls
       .def("multi_radius_totals", [](Dataset& d, const DoubleArray& radii, bool allocation, int self_var_method,

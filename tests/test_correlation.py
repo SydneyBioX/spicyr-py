@@ -15,9 +15,10 @@ from spicyr import _cell, _core
 HERE = Path(__file__).parent / "shared_cases"
 CELLS = pd.read_csv(HERE / "cells.csv")
 WEIGHTS = pd.read_csv(HERE / "weights.csv")
+WEIGHTS_BINARY = pd.read_csv(HERE / "weights_binary.csv")
 CASES = json.loads((HERE / "cases.json").read_text())
 WCASES = json.loads((HERE / "weights_cases.json").read_text())
-R_TO_PY = {"from": "from_", "adjustAbundance": "adjust_abundance"}
+R_TO_PY = {"from": "from_", "adjustAbundance": "adjust_abundance", "selfVariance": "self_variance"}
 SURV = {"os": "time", "os_na": "time_na", "os_few": "time_few"}
 
 
@@ -25,7 +26,9 @@ def run(args, weights=False):
     kw = {R_TO_PY.get(k, k): (v if not isinstance(v, list) or len(v) > 1 else v[0]) for k, v in args.items()}
     if kw["condition"] in SURV:
         kw.update(condition=SURV[kw["condition"]], survival="event")
-    return spicyr.spicy(CELLS, cell_weights=WEIGHTS if weights else None, **kw)
+    if weights:
+        weights = WEIGHTS_BINARY if kw.pop("weights", None) == "binary" else WEIGHTS
+    return spicyr.spicy(CELLS, cell_weights=weights if weights is not False else None, **kw)
 
 
 def close(got, exp, name):

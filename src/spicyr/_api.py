@@ -222,8 +222,14 @@ def spicy(
         weights (allocation), or the summed ``from`` weight of its neighbours (count). The null shuffles the ``to``
         weights over the cells whose ``from`` weight is below 1, whose exact mean and variance replace those of
         random labelling; 0/1 weights give the results of the cell types. The abundance share is the ``from``
-        label's summed weight over the image's cells. One radius, cells in memory; pairs of a label with itself are
-        not tested.
+        label's summed weight over the image's cells. A label with itself, and a pair where some ``to`` cells have
+        ``from`` weight 1 (for example a group and one of its subtypes), are tested instead under random labelling of
+        all the image's cells, each cell keeping its pair of ``from`` and ``to`` weights and never its own neighbour,
+        with the exact mean and variance of the score under that permutation (for the count effect, as for a
+        self-pair of cell types, the expected score is a share of the summed ``from`` weight around all the cells, the
+        share that gives the difference a mean of 0). With 0/1 weights a label with itself gives the self-pair of that
+        cell type (allocation: with the variance of ``self_variance``). One cell with ``from`` weight 1 and a ``to``
+        weight above 0 in any image is enough to test a pair this way in every image. One radius, cells in memory.
     weight_labels
         The labels of the columns of ``cell_weights`` when it is a 2-D numpy array or sparse matrix.
     self_variance

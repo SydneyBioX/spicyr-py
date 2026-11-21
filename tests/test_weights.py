@@ -14,8 +14,10 @@ import spicyr
 HERE = Path(__file__).parent / "shared_cases"
 CELLS = pd.read_csv(HERE / "cells.csv")
 WEIGHTS = pd.read_csv(HERE / "weights.csv")
+# 0/1 weights of the cell types and a "lymphocyte" group (T or B), for the cases with "weights": "binary"
+WEIGHTS_BINARY = pd.read_csv(HERE / "weights_binary.csv")
 CASES = json.loads((HERE / "weights_cases.json").read_text())
-R_TO_PY = {"from": "from_", "adjustAbundance": "adjust_abundance"}
+R_TO_PY = {"from": "from_", "adjustAbundance": "adjust_abundance", "selfVariance": "self_variance"}
 
 
 def one_hot(cells):
@@ -48,19 +50,31 @@ def test_one_hot_weights_give_the_cell_types(effect, adjust):
     kw = {"condition": "condition", "subject": "patient", "r": 30, "effect": effect, "adjust_abundance": adjust}
     hard = spicyr.spicy(CELLS, **kw).cell_results
     soft = spicyr.spicy(CELLS, cell_weights=one_hot(CELLS), **kw).cell_results
-    # self-pairs are not tested with weights, so the BH adjustment runs over the other pairs
-    hard = hard[hard["from"] != hard["to"]].copy()
-    for p in ("p_adj", "unadjusted_p_adj"):
-        if p in hard.columns:
-            hard[p] = spicyr._cell.p_adjust_bh(hard[p.replace("p_adj", "p_value")])
+    # self-pairs included: a label with itself gives the cell type's self-pair
+    assert (hard["from"] == hard["to"]).sum() == 6
     compare(soft, hard, tol=1e-12)
 
 
 def test_one_hot_weights_give_the_cell_types_with_three_levels_and_survival():
     w = one_hot(CELLS)
     for kw in (
-        {"condition": "stage", "subject": "patient", "r": 30, "from_": "tumour", "to": ["T", "B"], "covariates": "age"},
-        {"survival": ("time", "event"), "subject": "patient", "r": 30, "from_": "tumour", "to": ["T", "B"]},
+        {
+            "condition": "stage",
+            "subject": "patient",
+            "r": 30,
+            "from_": "tumour",
+            "to": ["tumour", "T", "B"],
+            "covariates": "age",
+        },
+        {"survival": ("time", "event"), "subject": "patient", "r": 30, "from_": "tumour", "to": ["tumour", "T", "B"]},
+        {
+            "survival": ("time", "event"),
+            "subject": "patient",
+            "r": 30,
+            "from_": "T",
+            "to": ["T", "B"],
+            "effect": "count",
+        },
     ):
         hard = spicyr.spicy(CELLS, adjust_abundance=True, **kw).cell_results
         soft = spicyr.spicy(CELLS, adjust_abundance=True, cell_weights=w, **kw).cell_results
@@ -99,10 +113,11 @@ def test_a_vector_of_cell_weights_is_the_one_hot_matrix_scaled_by_it(effect):
 @pytest.mark.parametrize("name", sorted(CASES))
 def test_case_matches_r(name):
     kw = {R_TO_PY.get(k, k): (v if not isinstance(v, list) or len(v) > 1 else v[0]) for k, v in CASES[name].items()}
+    w = WEIGHTS_BINARY if kw.pop("weights", None) == "binary" else WEIGHTS
     if kw["condition"] == "os":
         kw.pop("condition")
         kw["survival"] = ("time", "event")
-    got = spicyr.spicy(CELLS, cell_weights=WEIGHTS, **kw).cell_results
+    got = spicyr.spicy(CELLS, cell_weights=w, **kw).cell_results
     exp = pd.read_csv(HERE / f"{name}.csv", index_col=0)
     compare(got, exp, tol=1e-10, rtol=1e-7)
 
@@ -125,5 +140,6 @@ def test_weights_are_checked():
         spicyr.spicy(CELLS, cell_weights=WEIGHTS, from_="nope", **kw)
     with pytest.raises(ValueError, match="one radius"):
         spicyr.spicy(CELLS, cell_weights=WEIGHTS, **dict(kw, r=[10, 30]))
-    with pytest.raises(ValueError, match="different labels"):
-        spicyr.spicy(CELLS, cell_weights=WEIGHTS, from_="T", to="T", **kw)
+    # a label with no cells paired with itself is the only pair: nothing to test
+    with pytest.raises(ValueError, match="pair that can be tested"):
+        spicyr.spicy(CELLS, cell_weights=WEIGHTS.assign(empty=0.0), from_="empty", to="empty", **kw)
