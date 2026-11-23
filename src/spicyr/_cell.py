@@ -1,4 +1,4 @@
-"""spicyR Cell: the Python side of the cell-level analysis.
+"""spicyR v2: the Python side of the cell-level analysis.
 
 A line-for-line mirror of spicyR's ``R/cell.R``. Everything numeric happens in the shared C++ core; these
 functions only prepare inputs, call it and assemble tables, in the same order as the R package so that the
@@ -401,33 +401,35 @@ class Graph:
 
 
 def _graph(knn, effect, a, b, c):
-    if effect == "allocation":
+    if effect in ("fraction", "allocation"):
         return Graph(knn, effect, np.zeros(0), any=a, self_expected=b, self_var=c)
     return Graph(knn, effect, np.zeros(0), totals=a, sq=b, self_var=c)
 
 
-def cell_graphs_radii(ctx: Context, radii, effect: str = "allocation", n_threads=1) -> list:
+def cell_graphs_radii(ctx: Context, radii, effect: str = "fraction", n_threads=1) -> list:
     """Several radii from one neighbour search, image by image.
 
     One Graph per radius, each identical to cell_graph(ctx, pairs, r=radius, label_clustering=False, effect=effect).
     """
     return [
         _graph(False, effect, a, b, c)
-        for a, b, c in cell_stream(ctx, radii=radii, allocation=effect == "allocation", n_threads=n_threads)
+        for a, b, c in cell_stream(
+            ctx, radii=radii, allocation=effect in ("fraction", "allocation"), n_threads=n_threads
+        )
     ]
 
 
 def cell_graph(
-    ctx: Context, pairs, r=None, k=None, label_clustering=True, window="convex", n_threads=1, effect="allocation"
+    ctx: Context, pairs, r=None, k=None, label_clustering=True, window="convex", n_threads=1, effect="fraction"
 ) -> Graph:
     """Neighbour sums and the label-clustering factor at one radius (or k).
 
-    effect "allocation": for every cell, whether it has any cell of each type among its neighbours; "count": how many.
+    effect "fraction": for every cell, whether it has any cell of each type among its neighbours; "count": how many.
     Without the label-clustering factor (as spicy()) the sums are taken image by image (cell_stream()); the factor
     needs the whole-data Dataset (ctx.data, from cell_context(dataset=True)).
     """
     knn = k is not None
-    allocation = effect == "allocation"
+    allocation = effect in ("fraction", "allocation")
     if not label_clustering:
         a, b, c = cell_stream(ctx, radii=None if knn else r, k=k, allocation=allocation, n_threads=n_threads)[0]
         return _graph(knn, effect, a, b, c)
@@ -461,7 +463,7 @@ def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     fc, tc = ctx.type_labels.index(f), ctx.type_labels.index(t)
     # images with a missing condition give no row: they play no part in the side, tau2_image or the test
     ig = None if ctx.image_group is None else np.asarray(ctx.image_group, dtype=np.int32)
-    if g.effect == "allocation":
+    if g.effect in ("fraction", "allocation"):
         rows = _core.allocation_image_rows(g.any, g.self_expected, ctx.counts, T, fc, tc, g.psi, g.self_var, ig)
     else:
         rows = _core.excess_image_rows(g.totals, g.sq, ctx.counts, T, fc, tc, g.knn, g.psi, g.self_var, ig)
@@ -469,7 +471,7 @@ def cell_rows(ctx: Context, g: Graph, f: str, t: str) -> dict:
     if ctx.image_group is not None:
         rows["group"] = ctx.image_group[rows["img"]].astype(np.int32)
     side = None
-    if g.effect == "allocation":
+    if g.effect in ("fraction", "allocation"):
         # the pair's side, chosen in the core from the images (attraction scales by 1 - q, avoidance by q)
         side = "avoid" if float(np.sum(rows["O"] - rows["E"])) < 0 else "attract"
     if g.image_heterogeneity:
@@ -594,7 +596,7 @@ def cell_weighted(
     weights by Dataset.overlap_moments (a self-pair of a cell type then gives the cell-type self-pair), every other
     case by Dataset.overlap_soft_rows. ``survival_test(wctx, rows, f, t)``, if given, replaces the condition test.
     """
-    allocation = effect == "allocation"
+    allocation = effect in ("fraction", "allocation")
     ctx.data.build_radius_index(float(r))
     K = len(labels)
     rows_in_order = memb[ctx.ord]

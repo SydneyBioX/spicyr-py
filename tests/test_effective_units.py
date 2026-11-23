@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 from scipy import stats
+from test_skewness import ref_hall, ref_shrunk_skewness
 
 import spicyr
 from spicyr import _cell, _core
@@ -50,7 +51,7 @@ def num(v):
     return np.array([np.nan if x is None else float(x) for x in as_list(v)])
 
 
-def rows_at(r, effect="allocation", cells=CELLS):
+def rows_at(r, effect="fraction", cells=CELLS):
     ctx = _cell.cell_context(cells, "condition", None)
     g = _cell.cell_graph(ctx, [("tumour", "T")], r=r, label_clustering=False, effect=effect)
     g.image_heterogeneity = True
@@ -177,10 +178,25 @@ def test_cr2_by_hand():
     np.testing.assert_allclose(u0["se"] ** 2, sum(V), rtol=1e-10)
     se = np.sqrt(sum(V))
     dif = beta[1] - beta[0]
+    # the skewness correction: units' weights W = a J and residuals e = r / J, pooled over both conditions
+    W = J / (1 + u0["tau2"] * J)
+    e = (s - np.asarray(beta)[g] * J) / J
+    S = 1 / np.asarray(EV)
+    h = W / S[g]
+    z = np.sqrt(W) * e
+    kap = (
+        ref_shrunk_skewness(z, h)
+        * (  # shrunk by its own uncertainty (test_skewness.py)
+            (W[g == 1] ** 1.5).sum() / S[1] ** 3 - (W[g == 0] ** 1.5).sum() / S[0] ** 3
+        )
+        / sum(EV) ** 1.5
+    )
+    np.testing.assert_allclose(u0["skewness"], kap, rtol=1e-10)
+    tt = ref_hall(dif / se, kap)
     x = run(r=12.0).cell_results.iloc[0]
     np.testing.assert_allclose(
         [x["excess_difference"], x["se"], x["df"], x["p_value"]],
-        [dif, se, u0["df"], 2 * stats.t.sf(abs(dif / se), u0["df"])],
+        [dif, se, u0["df"], 2 * stats.t.sf(abs(tt), u0["df"])],
         rtol=1e-10,
     )
     # Hartung-Knapp keeps its own variance

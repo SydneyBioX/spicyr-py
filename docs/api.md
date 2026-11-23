@@ -37,7 +37,7 @@ The attributes of a results object:
 | `pairwise_assoc` | the effect of every pair in every image (what `bind()` returns) |
 | `image_weights` | the weight of every image in the test of every pair: its share of its group's information (the point sizes of `box_plot()`, and the `weight` column of `bind(from_=, to=)`) |
 | `condition_information` | with two conditions, each condition's information in the test of every pair (one row per pair, one column per group: the sum of its patients' weights); an image's weight times it is the image's weight on the scale of the model (what `test_correlation()` uses) |
-| `levels`, `image_ids`, `condition`, `subject`, `r`, `k`, `effect` | the groups, images and settings of the analysis (`effect`: "allocation" or "count") |
+| `levels`, `image_ids`, `condition`, `subject`, `r`, `k`, `effect` | the groups, images and settings of the analysis (`effect`: "fraction" or "count") |
 
 ## Proportions
 

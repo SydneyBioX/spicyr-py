@@ -1,5 +1,23 @@
 # spicyr news
 
+## 1.99.46
+
+- The two-condition test (CR2, no adjustment) corrects its t for skewness before taking the p-value: Hall's
+  transformation t + k t^2 / 3 + k^2 t^3 / 27 + k / 6 with k the skewness of the difference, from the patients'
+  residuals pooled over both conditions and weighted as in the test, shrunk by its own uncertainty (g^3 / (g^2 + V),
+  V the delta-method variance of the skewness from the patients' residuals), so that the correction fades out when the
+  skewness is poorly estimated; a condition with fewer than 3 patients gets no correction. With conditions of unequal
+  size (e.g. 20% v 80% of patients), right-skewed patient effects made the t skewed, with too many small p-values on
+  the side of a lower mean in the smaller condition. The difference, standard error and df are unchanged; p-values of
+  equal-sized conditions barely change. Adjusted designs, the tests of more than two conditions against the reference
+  (the follow-up comparisons of two levels are corrected), a continuous condition, survival and
+  `variance="hartung_knapp"` are not corrected. `SpicyResults.test_correlation(method="permutation")` and the
+  combination over radii use the corrected t. As in spicyR 1.99.61; the core is synced from spicyR 1.99.61.
+- `spicy()`: the extra fraction is `effect="fraction"` (the default), the name used in the spicyR 2 paper.
+  `effect="allocation"`, its earlier name, is still accepted and gives the same results; results now record effect
+  "fraction", and `box_plot()` accepts both. The documentation calls the cell method spicyR v2 and the image method
+  spicyR v1. As in spicyR 1.99.62.
+
 ## 1.99.45
 
 - `spicy()` with `cell_weights`: a label with itself, and a pair where some `to` cells have `from` weight 1 (a group

@@ -1,7 +1,7 @@
 ## Shared test cases for soft cell type membership (spicy(cellWeights =)): spicyR (R) computes the expected results
 ## on the cells of make_cases.R with the weights in weights.csv; tests/test_weights.py must reproduce them. Rerun after
 ## any change to the core or to either front end:
-##   Rscript tests/shared_cases/make_weights_cases.R      (needs spicyR >= 1.99.60)
+##   Rscript tests/shared_cases/make_weights_cases.R      (needs spicyR >= 1.99.61)
 ## Cases with `weights = "binary"` use weights_binary.csv: 0/1 weights of the cell types and a "lymphocyte" group (T or
 ## B), so a label with itself and a group with its subtypes give the cell types' self-pairs and nested labels.
 suppressPackageStartupMessages(library(spicyR))

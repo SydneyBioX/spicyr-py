@@ -1,7 +1,7 @@
 ## Shared test cases for the accessors of the results: spicyR (R) writes what topPairs() and bind() return on the
 ## cells of make_cases.R; tests/test_accessors.py must give the same tables with top_pairs() and bind(). Rerun after
 ## any change to either front end's accessors:
-##   Rscript tests/shared_cases/make_accessor_cases.R      (needs spicyR >= 1.99.57)
+##   Rscript tests/shared_cases/make_accessor_cases.R      (needs spicyR >= 1.99.61)
 suppressPackageStartupMessages(library(spicyR))
 out_dir <- file.path("tests", "shared_cases")
 cells <- utils::read.csv(file.path(out_dir, "cells.csv"))

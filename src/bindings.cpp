@@ -412,6 +412,7 @@ PYBIND11_MODULE(_core, m) {
     py::dict o;
     o["ok"] = r.ok; o["reason"] = r.reason; o["coef_ref"] = r.coef_ref; o["coef_comp"] = r.coef_comp;
     o["difference"] = r.difference; o["se"] = r.se; o["df"] = r.df; o["p"] = r.p; o["tau2"] = r.tau2;
+    o["skewness"] = r.skewness; o["t"] = r.t;
     o["influence"] = arr(r.influence); o["unit_summary"] = arr(r.unit_summary); o["unit_info"] = arr(r.unit_info);
     o["image_weight"] = arr(r.image_weight); o["n_eff"] = arr(r.n_eff);
     o["n_units"] = arr(r.n_units); o["group_weight"] = arr(r.group_weight);

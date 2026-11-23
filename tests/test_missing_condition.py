@@ -74,14 +74,14 @@ def _all_same(tables):
         _same(a, b)
 
 
-@pytest.mark.parametrize("effect", ["count", "allocation"])
+@pytest.mark.parametrize("effect", ["count", "fraction"])
 def test_missing_condition_left_out_as_if_removed(effect):
     _all_same(_full_and_sub("cond", effect=effect))
     _all_same(_full_and_sub("cond", subject="patient", effect=effect))
     _all_same(_full_and_sub("cond", subject="patient", r=[10.0, 20.0, 30.0], combine="davies", effect=effect))
 
 
-@pytest.mark.parametrize("effect", ["count", "allocation"])
+@pytest.mark.parametrize("effect", ["count", "fraction"])
 def test_missing_condition_left_out_of_adjusted_design(effect):
     t = _full_and_sub("cond", subject="patient", covariates=["cv"], effect=effect)
     assert (t[0]["adjusted_for"] == "covariates").any()
@@ -102,7 +102,7 @@ def test_missing_condition_left_out_of_adjusted_design(effect):
     )
 
 
-@pytest.mark.parametrize("effect", ["count", "allocation"])
+@pytest.mark.parametrize("effect", ["count", "fraction"])
 def test_missing_condition_left_out_of_three_conditions(effect):
     _all_same(_full_and_sub("cond3", subject="patient", effect=effect))
     _all_same(_full_and_sub("cond3", subject="patient", covariates=["cv"], effect=effect))

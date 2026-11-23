@@ -8,6 +8,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import stats
 
 import spicyr
 from spicyr import _core
@@ -242,7 +243,16 @@ def test_soft_pairs_whose_to_cells_all_are_candidates_give_the_results_of_spicyr
         # at the shared cases' tolerance (libm differs between platforms); p_adj is over every tested pair, and the
         # self-pairs are now among them; the file has the columns of both effects (count has no side)
         for col in [c for c in exp.columns.drop(["case", "p_adj"]) if c in now.columns or exp[c].notna().any()]:
-            if exp[col].dtype.kind in "fi":
+            if col == "p_value":
+                # the skewness correction of the two-condition CR2 t changes p-values only: each equals the reference
+                # as it is or as the uncorrected p of the same row
+                p, ref = now[col].to_numpy(float), exp[col].to_numpy(float)
+                t = (now["excess_difference"] / now["se"]).to_numpy(float)
+                p_unc = 2 * stats.t.sf(np.abs(t), now["df"].to_numpy(float))
+                assert np.array_equal(np.isnan(p), np.isnan(ref)), case
+                close = np.isclose(p, ref, rtol=1e-7, atol=1e-10) | np.isclose(p_unc, ref, rtol=1e-7, atol=1e-10)
+                assert (close | np.isnan(ref)).all(), case
+            elif exp[col].dtype.kind in "fi":
                 np.testing.assert_allclose(
                     now[col].to_numpy(float),
                     exp[col].to_numpy(float),
@@ -255,7 +265,7 @@ def test_soft_pairs_whose_to_cells_all_are_candidates_give_the_results_of_spicyr
                 assert (now[col].fillna("").astype(str) == exp[col].fillna("").astype(str)).all(), f"{case} {col}"
 
 
-@pytest.mark.parametrize("effect", ["allocation", "count"])
+@pytest.mark.parametrize("effect", ["fraction", "count"])
 def test_several_pairs_in_one_call_equal_one_pair_at_a_time(effect):
     w = WEIGHTS.copy()
     w["lymphocyte01"] = CELLS["cellType"].isin(["T", "B"]).astype(float).to_numpy()
@@ -272,7 +282,7 @@ def test_several_pairs_in_one_call_equal_one_pair_at_a_time(effect):
 def test_soft_self_pairs_a_soft_subtype_of_a_0_1_group_and_the_count_effect_are_tested():
     w = soft_inputs()["dense"]
     w["lymphocyte"] = CELLS["cellType"].isin(["T", "B"]).astype(float).to_numpy()
-    for effect in ("allocation", "count"):
+    for effect in ("fraction", "count"):
         b = spicyr.spicy(
             CELLS,
             condition="condition",

@@ -275,7 +275,7 @@ To ask about arrangement within a compartment, for example whether proliferating
 Kontextual test in the R package Statial does this.
 :::
 
-## Allocation or count?
+## Extra fraction or count?
 
 By default spicyr asks whether each `to` cell has a `from` cell nearby. With `effect="count"` it asks how many: the
 effect is then the number of extra `from` cells within the radius of each `to` cell.
@@ -463,7 +463,7 @@ from the data in the same way (a frailty, or random-effects, model). The differe
 tested on Satterthwaite degrees of freedom with patients as the clusters, using the small-sample cluster-robust (CR2)
 variance, each group contributing its own CR2 variance. For a self-pair (`from_` the same as `to`), whose cells and
 neighbours are both moved by random labelling, the variance is the exact random-labelling variance of the self-pair.
-With the allocation effect, an image whose room on the pair's side is below one cell is not used. A radius where a group's effective patients fall below the smaller of three and
+With the extra fraction, an image whose room on the pair's side is below one cell is not used. A radius where a group's effective patients fall below the smaller of three and
 half its patients at that radius, because a few patients carry nearly all of its weight, is not tested. This is designed to keep false positives near the nominal
 rate even with modest numbers of patients. A paper describing the method is in preparation.
 

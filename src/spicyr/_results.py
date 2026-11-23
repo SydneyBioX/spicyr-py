@@ -71,8 +71,8 @@ class SpicyResults:
     """Results of :func:`spicyr.spicy`.
 
     ``cell_results`` is the full table, one row per pair (and per level when there are more than two
-    conditions): for the allocation effect the pair's ``side`` ("attract" or "avoid", which sets its scale), the effect
-    (``effect``: "allocation", the fraction of ``to`` cells moved next to or away from ``from`` cells within ``r``,
+    conditions): for the extra fraction the pair's ``side`` ("attract" or "avoid", which sets its scale), the effect
+    (``effect``: "fraction", the extra fraction of ``to`` cells moved next to or away from ``from`` cells within ``r``,
     or "count", the extra ``from`` cells per ``to`` cell) in the reference condition (``excess_ref``) and the
     comparison condition, the
     difference, its standard error, Satterthwaite df, p-value and BH-adjusted p-value, the frailty variance
@@ -109,7 +109,7 @@ class SpicyResults:
     r: list | None = None
     k: int | None = None
     method: str = "cell"
-    effect: str = "allocation"
+    effect: str = "fraction"
     variance: str | None = None
     continuous: bool = False
     follow_up_results: pd.DataFrame | None = None
@@ -170,8 +170,8 @@ class SpicyResults:
         permutation every test is recomputed in closed form from the patients' summaries and weights (each condition's
         weighted mean, its CR2 variance and Satterthwaite df, as :func:`spicyr.spicy` computes them; the
         between-patient variance is held at the fit's, and of spicy()'s rules for not testing a pair only the need for
-        two patients in each condition is applied), and its p-value is turned into a z with the sign of the difference
-        (0 when a condition has fewer than two of the pair's patients). The correlation of the tests' z over the permutations is returned. The permutations come from a
+        two patients in each condition is applied), and its p-value is turned into a z with the sign of its
+        (skewness-corrected) t (0 when a condition has fewer than two of the pair's patients). The correlation of the tests' z over the permutations is returned. The permutations come from a
         fixed seed, so a result always gives the same matrix, in Python and in R.
 
         Needs two conditions, one radius (or ``k``), no adjustment (no covariates, ``adjust_abundance=False``) and
@@ -344,7 +344,7 @@ class SpicyResults:
         One row per called pair and comparison (``level_ref`` is the reference of the comparison, ``level_comp``
         the other level): ``excess_ref``, ``excess_comp``, ``excess_difference``, ``se``, ``df``, ``p_value``,
         ``p_threshold``, ``significant``, the pair's ``overall_p_value`` and ``overall_p_adj``, ``n_comparisons``,
-        ``tau2`` and ``not_tested``; ``side`` and ``tau2_image`` for the allocation effect; with adjustment,
+        ``tau2`` and ``not_tested``; ``side`` and ``tau2_image`` for the extra fraction; with adjustment,
         ``adjusted_for`` and the unadjusted difference and p-value. Sorted by the overall p-value, then the
         comparison's p-value.
 
@@ -462,7 +462,7 @@ class SpicyResults:
         d["relative"] = d["weight"] / d.groupby("condition")["weight"].transform("mean")
         groups = [g for g in (self.levels or []) if (d["condition"] == g).any()]
         sized = bool(np.isfinite(d["relative"]).any())
-        if self.effect == "allocation":
+        if self.effect in ("fraction", "allocation"):
             ylabel, title = f"Extra fraction of {to} next to {from_}<br>(beyond chance)", f"{to} next to {from_}"
         else:
             ylabel, title = f"Extra {from_} per {to}<br>(beyond chance)", f"{from_} around {to}"
@@ -503,7 +503,7 @@ class SpicyResults:
     def _scatter(self, d, from_, to, key, ax, interactive):
         """A continuous condition: the per-image excess against the condition, with the fitted slope."""
         d = d[np.isfinite(d["condition"].to_numpy(float))]
-        if self.effect == "allocation":
+        if self.effect in ("fraction", "allocation"):
             ylabel, title = f"Extra fraction of {to} next to {from_}\n(beyond chance)", f"{to} next to {from_}"
         else:
             ylabel, title = f"Extra {from_} per {to}\n(beyond chance)", f"{from_} around {to}"

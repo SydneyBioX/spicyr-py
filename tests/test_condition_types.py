@@ -30,7 +30,7 @@ def test_continuous_is_the_slope_of_the_design():
     # the design test with the intercept and the centred condition, on the pair's rows
     ctx = _cell.cell_context(CELLS, "age", "patient")
     assert ctx.continuous
-    g = _cell.cell_graph(ctx, [("tumour", "T")], r=30, label_clustering=False, effect="allocation")
+    g = _cell.cell_graph(ctx, [("tumour", "T")], r=30, label_clustering=False, effect="fraction")
     g.image_heterogeneity = True
     rows = _cell.cell_rows(ctx, g, "tumour", "T")
     x = ctx.x[rows["img"]]
@@ -83,7 +83,7 @@ def test_continuous_missing_is_removed():
 
 def test_joint_test_of_one_contrast_is_the_t_test():
     ctx = _cell.cell_context(CELLS, "stage", "patient")
-    g = _cell.cell_graph(ctx, [("tumour", "T")], r=30, label_clustering=False, effect="allocation")
+    g = _cell.cell_graph(ctx, [("tumour", "T")], r=30, label_clustering=False, effect="fraction")
     g.image_heterogeneity = True
     rows = _cell.cell_rows(ctx, g, "tumour", "T")
     Z = (rows["group"][:, None] == np.arange(3)[None, :]).astype(float)

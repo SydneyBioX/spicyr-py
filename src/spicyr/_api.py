@@ -27,7 +27,7 @@ def spicy(
     from_=None,
     to=None,
     method="cell",
-    effect="allocation",
+    effect="fraction",
     k=None,
     combine="davies",
     adjust_abundance=False,
@@ -51,7 +51,7 @@ def spicy(
 
     In each image, the share of ``to`` cells with at least one ``from`` cell within ``r`` is compared with its exact
     expectation q if the ``to`` cells were a random choice among the cells that are not ``from`` cells (random
-    labelling of the observed cells). The effect (``effect="allocation"``, the default) is the **fraction of** ``to``
+    labelling of the observed cells). The effect (``effect="fraction"``, the default) is the **fraction of** ``to``
     **cells placed next to (or kept away from)** ``from`` **cells**. For a pair that attracts (more ``to`` cells next to
     ``from`` cells than q over all images together) it is (observed share - q) / (1 - q): if a fraction f of the ``to``
     cells were moved next to ``from`` cells, the effect is f. For a pair that avoids it is (observed share - q) / q: if
@@ -70,7 +70,7 @@ def spicy(
     1), there is little room for attraction and an attracting pair's images carry little information; a smaller ``r``
     is more informative.
 
-    The allocation effect is bounded: an image of an avoiding pair with no ``to`` cell next to a ``from`` cell has the
+    The extra fraction is bounded: an image of an avoiding pair with no ``to`` cell next to a ``from`` cell has the
     effect -1, and an image of an attracting pair with every ``to`` cell next to one has +1. A patient is informative
     at a radius when at least one of its images is not at -1 or +1. A radius where one condition has no informative
     patient is not tested: that condition's patients all have the same effect, so its spread is exactly 0 and the
@@ -82,9 +82,17 @@ def spicy(
     of freedom; with adjustment, the CR2 variance of the adjusted design. ``variance="hartung_knapp"`` keeps its own
     variance.
 
+    Without adjustment, the CR2 t of two conditions is corrected for skewness (a one-term Edgeworth expansion, Hall's
+    transformation) before its p-value is taken: with conditions of unequal size, right-skewed patient effects make
+    the t of the smaller condition's mean skewed, with too many small p-values on one side. The skewness comes from
+    the patients' residuals, pooled over both conditions and weighted as in the test, and is shrunk by its own
+    uncertainty, so that the correction fades out in small studies; it also vanishes for conditions of equal size and
+    weight, and is not applied when a condition has fewer than 3 patients. The difference, standard error and df are
+    unchanged.
+
     For a self-pair (``from_`` = ``to``) every cell can carry the label, so random labelling moves both the cells
     counted and their neighbours. Its variance is the random-labelling variance of the self-pair (for the radius graph
-    and for the k nearest neighbours), not the variance of a pair of two types. For the allocation effect this variance
+    and for the k nearest neighbours), not the variance of a pair of two types. For the extra fraction this variance
     depends on how many neighbours each pair of nearby cells shares, which takes time in proportion to the number of
     cells times the square of the number of neighbours per cell. With a radius, the shared neighbours are by default
     counted from ``self_variance_cells`` randomly chosen cells of each image and scaled up
@@ -93,7 +101,7 @@ def spicy(
     to share their local density times the area where their two discs overlap; ``"geometricSampled"`` corrects that
     with the sampled cells. The count effect and the k nearest neighbours always use the exact variance.
 
-    With the allocation effect, an image whose room on the pair's side (the ``to`` cells without a ``from`` neighbour
+    With the extra fraction, an image whose room on the pair's side (the ``to`` cells without a ``from`` neighbour
     expected by chance for an attracting pair, those with one for an avoiding pair) is below one cell is not used:
     its effect could not show the pair's side, and could be large in the other direction. The side is chosen first,
     from every image.
@@ -180,11 +188,12 @@ def spicy(
     from_, to
         Cell types to test (all ordered pairs by default).
     method
-        "cell" (spicyR Cell). The image-level method of spicyR is not yet available in Python.
+        "cell" (spicyR v2). The image-level method of spicyR (spicyR v1) is not yet available in Python.
     effect
-        "allocation" (default): the fraction of ``to`` cells moved next to (or away from) ``from`` cells within ``r``;
-        "count": the number of extra ``from`` cells within ``r`` of each ``to`` cell. With ``k``, "within ``r``"
-        means among the cell's ``k`` nearest neighbours.
+        "fraction" (default): the extra fraction of ``to`` cells moved next to (or away from) ``from`` cells within
+        ``r``; "count": the number of extra ``from`` cells within ``r`` of each ``to`` cell. "allocation", the earlier
+        name of "fraction", is also accepted. With ``k``, "within ``r``" means among the cell's ``k`` nearest
+        neighbours.
     k
         Use the ``k`` nearest neighbours instead of a radius.
     adjust_abundance
@@ -219,7 +228,7 @@ def spicy(
         the cells x cell types matrix with each cell's weight in its own type's column. With a matrix, ``from_`` and
         ``to`` name labels, and labels may overlap (a group and its subtypes). A ``to`` cell counts with its weight,
         and its score is the chance that it has a ``from`` neighbour within ``r`` if labels were drawn from the
-        weights (allocation), or the summed ``from`` weight of its neighbours (count). The null shuffles the ``to``
+        weights (fraction), or the summed ``from`` weight of its neighbours (count). The null shuffles the ``to``
         weights over the cells whose ``from`` weight is below 1, whose exact mean and variance replace those of
         random labelling; 0/1 weights give the results of the cell types. The abundance share is the ``from``
         label's summed weight over the image's cells. A label with itself, and a pair where some ``to`` cells have
@@ -228,12 +237,12 @@ def spicy(
         with the exact mean and variance of the score under that permutation (for the count effect, as for a
         self-pair of cell types, the expected score is a share of the summed ``from`` weight around all the cells, the
         share that gives the difference a mean of 0). With 0/1 weights a label with itself gives the self-pair of that
-        cell type (allocation: with the variance of ``self_variance``). One cell with ``from`` weight 1 and a ``to``
+        cell type (fraction: with the variance of ``self_variance``). One cell with ``from`` weight 1 and a ``to``
         weight above 0 in any image is enough to test a pair this way in every image. One radius, cells in memory.
     weight_labels
         The labels of the columns of ``cell_weights`` when it is a 2-D numpy array or sparse matrix.
     self_variance
-        Cell method, allocation effect with a radius: how a self-pair's variance counts the neighbours shared by
+        Cell method, extra fraction with a radius: how a self-pair's variance counts the neighbours shared by
         nearby cells: ``"sampled"`` (the default), ``"exact"``, ``"geometricSampled"`` or ``"geometric"`` (see above).
     self_variance_cells
         The number of cells sampled in each image for ``"sampled"`` or ``"geometricSampled"`` (every cell when an
@@ -260,8 +269,10 @@ def spicy(
         raise ValueError("combine must be 'maxT', 'davies' or 'cauchy'.")
     if variance not in ("cr2", "hartung_knapp"):
         raise ValueError("variance must be 'cr2' or 'hartung_knapp'.")
-    if effect not in ("allocation", "count"):
-        raise ValueError("effect must be 'allocation' or 'count'.")
+    if effect not in ("fraction", "count", "allocation"):
+        raise ValueError("effect must be 'fraction' or 'count' ('allocation' is accepted for 'fraction').")
+    if effect == "allocation":
+        effect = "fraction"
     if r is None and k is None:
         r = 50
     weighted = cell_weights is not None
@@ -315,7 +326,7 @@ def spicy(
     if bad:
         matrix = weighted and not _cell.is_weight_vector(cell_weights)
         raise ValueError(f"not a column of `cell_weights`: {bad}" if matrix else f"cell type not found: {bad}")
-    # from -> to: are `to` cells placed next to `from` cells (allocation: the extra fraction of `to` cells with a `from`
+    # from -> to: are `to` cells placed next to `from` cells (fraction: the extra fraction of `to` cells with a `from`
     # cell within r; count: extra `from` cells within r of each `to` cell), beyond the `to` cells being a random subset
     # of the cells that are not `from` cells. This is the core's own (counted, centre) order, so pairs pass through.
     pairs = list(_cell.enumerate_pairs(from_, to, types))
@@ -437,7 +448,7 @@ def _pairs(ctx, graphs, pairs, variance, adjust, Z_extra, extra_names, radii, co
     unadjusted test); the other columns are those of the radius chosen by max-T. The image rows are those of the
     radius nearest the median.
     """
-    allocation = graphs[0].effect == "allocation"
+    allocation = graphs[0].effect in ("fraction", "allocation")
     K = len(graphs)
     keep = int(np.argmin(np.abs(np.array(radii) - np.median(radii)))) if K > 1 else 0
     from_ = [p[0] for p in pairs]
@@ -608,7 +619,7 @@ def _pairs_table(x, k, from_, to, allocation, adjusted, extra_names, enames=None
     return _cell.order_columns(tab)
 
 
-def _survival(ctx, pairs, r, k, sv, Z_extra, cores, adjust, effect="allocation"):
+def _survival(ctx, pairs, r, k, sv, Z_extra, cores, adjust, effect="fraction"):
     """Survival: score test and the hazard ratio of the shrunken excess, per pair, at one radius (or k)."""
     g = _cell.cell_graph(
         ctx,

@@ -44,7 +44,7 @@ def compare(got, exp, tol=1e-12, rtol=0.0):
     return worst
 
 
-@pytest.mark.parametrize("effect", ["allocation", "count"])
+@pytest.mark.parametrize("effect", ["fraction", "count"])
 @pytest.mark.parametrize("adjust", [False, True])
 def test_one_hot_weights_give_the_cell_types(effect, adjust):
     kw = {"condition": "condition", "subject": "patient", "r": 30, "effect": effect, "adjust_abundance": adjust}
@@ -99,7 +99,7 @@ def test_weights_follow_the_rows_of_the_cells():
     compare(got, ref, tol=1e-12, rtol=1e-12)
 
 
-@pytest.mark.parametrize("effect", ["allocation", "count"])
+@pytest.mark.parametrize("effect", ["fraction", "count"])
 def test_a_vector_of_cell_weights_is_the_one_hot_matrix_scaled_by_it(effect):
     kw = {"condition": "condition", "subject": "patient", "r": 30, "effect": effect, "adjust_abundance": True}
     q = np.round(np.random.default_rng(7).uniform(0.2, 1, len(CELLS)), 3)
