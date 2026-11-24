@@ -1,5 +1,13 @@
 # spicyr news
 
+## 1.99.47
+
+- `spicy()`, cell method with soft `cell_weights`: the mean and variance of a label with itself (and of a group with
+  its subtype) under random labelling now come by default from a closed form that corrects every pair of cells
+  exactly for sampling without replacement (exact for up to two cells, second order in 1 / cells). Its cost no longer
+  grows with cells x neighbourhood size^2, and each image's neighbour structure is built once per fit.
+  `self_variance="exact"` keeps the exact moments. As in spicyR 2.1.1; the core is synced from spicyR 2.1.1.
+
 ## 1.99.46
 
 - The two-condition test (CR2, no adjustment) corrects its t for skewness before taking the p-value: Hall's

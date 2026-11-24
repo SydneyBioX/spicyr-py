@@ -234,7 +234,10 @@ def spicy(
         label's summed weight over the image's cells. A label with itself, and a pair where some ``to`` cells have
         ``from`` weight 1 (for example a group and one of its subtypes), are tested instead under random labelling of
         all the image's cells, each cell keeping its pair of ``from`` and ``to`` weights and never its own neighbour,
-        with the exact mean and variance of the score under that permutation (for the count effect, as for a
+        with the mean and variance of the score under that permutation (fraction: by default from a closed form that
+        corrects every pair of cells exactly for sampling without replacement, exact for up to two cells and second
+        order in 1 / cells; ``self_variance="exact"`` computes them exactly, at a cost of cells x neighbourhood size^2
+        per image; count: exact) (for the count effect, as for a
         self-pair of cell types, the expected score is a share of the summed ``from`` weight around all the cells, the
         share that gives the difference a mean of 0). With 0/1 weights a label with itself gives the self-pair of that
         cell type (fraction: with the variance of ``self_variance``). One cell with ``from`` weight 1 and a ``to``
@@ -244,6 +247,8 @@ def spicy(
     self_variance
         Cell method, extra fraction with a radius: how a self-pair's variance counts the neighbours shared by
         nearby cells: ``"sampled"`` (the default), ``"exact"``, ``"geometricSampled"`` or ``"geometric"`` (see above).
+        With soft ``cell_weights``, ``"exact"`` gives the exact moments of the pairs tested under random labelling of
+        all cells, and any other value the closed form described under ``cell_weights``.
     self_variance_cells
         The number of cells sampled in each image for ``"sampled"`` or ``"geometricSampled"`` (every cell when an
         image has no more).

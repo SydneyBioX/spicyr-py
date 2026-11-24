@@ -317,9 +317,9 @@ PYBIND11_MODULE(_core, m) {
       // FROM weights a (one per cell) and TO weights b (n_pairs labels, pair-major: p * n_cells + cell). Per image and
       // pair ((img * n_pairs + p) * 4): O, E, the variance and sum b
       .def("overlap_soft_rows", [](const Dataset& d, const DoubleArray& a, const DoubleArray& b, int n_pairs,
-                                   bool allocation) {
-        return arr(d.overlap_soft_rows(vec<double>(a), vec<double>(b), n_pairs, allocation));
-      }, py::arg("a"), py::arg("b"), py::arg("n_pairs"), py::arg("allocation"))
+                                   bool allocation, bool exact) {
+        return arr(d.overlap_soft_rows(vec<double>(a), vec<double>(b), n_pairs, allocation, exact));
+      }, py::arg("a"), py::arg("b"), py::arg("n_pairs"), py::arg("allocation"), py::arg("exact") = true)
       // several radii from one neighbour search: per radius (any, self_expected, self_var) or (totals, sq, self_var), as
       // the single-radius calls
       .def("multi_radius_totals", [](Dataset& d, const DoubleArray& radii, bool allocation, int self_var_method,

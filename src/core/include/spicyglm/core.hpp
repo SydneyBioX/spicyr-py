@@ -4,6 +4,7 @@
 #pragma once
 
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -254,9 +255,10 @@ class Dataset {
   // mean E, its variance under the permutation, and sum b. Allocation: O = sum_l b_l (1 - prod_{k in N(l)} (1 - a_k)),
   // E = E O. Count: O = sum_l b_l sum_{k in N(l)} a_k, E = p L with L = sum_l sum_{k in N(l)} a_k and p such that
   // E (O - p L) = 0, and the variance is that of O - p L ((nA - 1) / (N - 1) for 0/1 self-pairs, as spicy()). Needs
-  // build_radius_index.
+  // build_radius_index. exact = false: the allocation moments from the closed-form second-order means
+  // (soft_means_pairwise) instead of the exact ones, which cost cells x neighbourhood size^2 per image.
   std::vector<double> overlap_soft_rows(const std::vector<double>& a, const std::vector<double>& b, int n_pairs,
-                                        bool allocation) const;
+                                        bool allocation, bool exact = true) const;
 
  private:
   struct Grid {
@@ -280,6 +282,10 @@ class Dataset {
   void self_any_from_counts(int img, const std::vector<double>& c, double* out_img) const;
   // The out-neighbour lists of image img's cells (local indices, CSR), b excluded.
   void own_neighbour_lists(int img, bool knn, std::vector<int>& ptr, std::vector<int>& nb) const;
+  // overlap_soft_rows(): each image's soft-weight graph structure (it depends only on the cells and the radius), built
+  // once and reused by every later call at the same radius
+  mutable std::vector<std::shared_ptr<const void>> soft_graph_cache_;
+  mutable double soft_graph_cache_r_ = -1;
   // self_variances for one image from its neighbour lists
   void self_variance_from_lists(int img, const std::vector<int>& ptr, const std::vector<int>& nb, bool allocation,
                                 double* out_img) const;

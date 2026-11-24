@@ -645,7 +645,9 @@ def cell_weighted(
         S = None
         if soft:
             b = np.concatenate([weights_of(labels.index(to[k])) for k in soft])
-            S = ctx.data.overlap_soft_rows(a, b, len(soft), allocation).reshape(ctx.n_images, len(soft), 4)
+            S = ctx.data.overlap_soft_rows(a, b, len(soft), allocation, exact=ctx.self_var[0] == "exact").reshape(
+                ctx.n_images, len(soft), 4
+            )
         for k in mine:
             t = to[k]
             if counts[k]:

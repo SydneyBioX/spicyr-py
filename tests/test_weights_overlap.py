@@ -295,3 +295,22 @@ def test_soft_self_pairs_a_soft_subtype_of_a_0_1_group_and_the_count_effect_are_
         ).cell_results
         assert list(b.index) == ["T__T", "T__lymphocyte", "lymphocyte__T", "lymphocyte__lymphocyte"]
         assert np.all(np.isfinite(b["p_value"])), effect
+
+
+def test_the_closed_form_self_pair_moments_match_the_exact_ones():
+    # spicyR 2.1.1 / spicyr 1.99.47: with exact=False the soft self-pair mean and variance come from the closed form
+    # (second order in 1 / cells); on an image of a few hundred cells they agree with the exact moments closely
+    rng = np.random.default_rng(2026)
+    N, r = 400, 0.06
+    x, y = rng.uniform(size=N), rng.uniform(size=N)
+    d = one_image(x, y, r)
+    a = np.where(rng.uniform(size=N) < 0.3, rng.uniform(size=N), 0.0)
+    for alloc in (True, False):
+        ex = d.overlap_soft_rows(a, a, 1, alloc, exact=True)
+        cf = d.overlap_soft_rows(a, a, 1, alloc, exact=False)
+        assert cf[0] == pytest.approx(ex[0], rel=1e-12)  # observed
+        assert cf[1] == pytest.approx(ex[1], rel=1e-3)  # mean
+        assert cf[2] == pytest.approx(ex[2], rel=0.03)  # variance
+        assert cf[3] == pytest.approx(ex[3], rel=1e-12)
+        if not alloc:  # the count effect is always exact
+            assert cf[2] == pytest.approx(ex[2], rel=1e-12)
